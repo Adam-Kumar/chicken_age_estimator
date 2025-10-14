@@ -1,0 +1,24 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Source code
+*.py text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+
+# Data files
+*.csv text eol=lf
+*.json text eol=lf
+
+# Binary files
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.pth binary
+*.pt binary
+*.pkl binary
+*.npy binary
+*.npz binary
+
+# Ensure Unix line endings in repository for shell scripts
+*.sh text eol=lf
