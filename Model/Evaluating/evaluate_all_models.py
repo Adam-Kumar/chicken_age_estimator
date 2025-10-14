@@ -7,12 +7,25 @@ This script:
 3. Generates comparison visualizations:
    - Metrics comparison table (MAE, RMSE, params)
    - Side-by-side scatter plots
+   - Combined confusion matrices (3 models side-by-side)
    - Training curves comparison
    - Bar chart comparing metrics
-4. Saves results to Model/comparison/
+4. Saves results to Results/comparison/ and Results/predictions/
 
 Usage:
-    python Model/evaluate_all_models.py
+    python Model/Evaluating/evaluate_all_models.py
+
+Outputs:
+    Results/comparison/:
+        - metrics_comparison.csv - Performance metrics table
+        - scatter_comparison.png - Side-by-side scatter plots
+        - confusion_matrix_comparison.png - Combined confusion matrices
+        - metrics_comparison.png - Bar charts (MAE, RMSE)
+        - training_curves_comparison.png - Training curves
+    Results/predictions/:
+        - predictions_baseline_test.csv
+        - predictions_late_fusion_test.csv
+        - predictions_feature_fusion_test.csv
 """
 
 from __future__ import annotations
@@ -27,6 +40,8 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
+from sklearn.metrics import confusion_matrix
+import seaborn as sns
 
 # Ensure project root on path
 _project_root = _Path(__file__).resolve().parent.parent
@@ -219,15 +234,53 @@ def plot_training_curves_comparison(output_path: _Path):
     plt.close()
 
 
+def plot_confusion_matrices(results: Dict, output_path: _Path):
+    """Create combined confusion matrix visualization for all models."""
+    fig, axes = plt.subplots(1, 3, figsize=(20, 6))
+
+    cmaps = {"baseline": "Blues", "late_fusion": "Oranges", "feature_fusion": "Greens"}
+
+    for idx, (model_type, res) in enumerate(results.items()):
+        ax = axes[idx]
+
+        # Round predictions to nearest integer day (1-7)
+        preds_arr = np.array(res["predictions"])
+        gts_arr = np.array(res["ground_truth"])
+        preds_rounded = np.clip(np.round(preds_arr), 1, 7).astype(int)
+        gts_rounded = np.round(gts_arr).astype(int)
+
+        # Create confusion matrix
+        cm = confusion_matrix(gts_rounded, preds_rounded, labels=[1, 2, 3, 4, 5, 6, 7])
+
+        # Plot heatmap
+        sns.heatmap(cm, annot=True, fmt='d', cmap=cmaps[model_type],
+                    xticklabels=[1, 2, 3, 4, 5, 6, 7],
+                    yticklabels=[1, 2, 3, 4, 5, 6, 7],
+                    cbar_kws={'label': 'Count'},
+                    ax=ax)
+        ax.set_xlabel("Predicted Day", fontsize=11)
+        ax.set_ylabel("Ground Truth Day", fontsize=11)
+        ax.set_title(f"{MODEL_CONFIGS[model_type]['name']}\nMAE: {res['mae']:.3f}", fontsize=12)
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150)
+    print(f"Combined confusion matrix saved to {output_path}")
+    plt.close()
+
+
 def save_predictions(results: Dict, output_dir: _Path):
     """Save predictions from all models to CSV."""
+    pred_dir = _project_root / "Results" / "predictions"
+    pred_dir.mkdir(exist_ok=True, parents=True)
+
     for model_type, res in results.items():
-        csv_path = output_dir / f"predictions_{model_type}.csv"
+        csv_path = pred_dir / f"predictions_{model_type}_test.csv"
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow(["index", "ground_truth", "prediction"])
+            writer.writerow(["index", "ground_truth", "prediction", "error"])
             for i, (gt, pred) in enumerate(zip(res["ground_truth"], res["predictions"])):
-                writer.writerow([i, gt, pred])
+                error = abs(pred - gt)
+                writer.writerow([i, gt, pred, error])
         print(f"Predictions saved to {csv_path}")
 
 
@@ -321,7 +374,8 @@ def main():
 
     plot_scatter_comparison(results, OUTPUT_DIR / "scatter_comparison.png")
     plot_metrics_comparison(results, OUTPUT_DIR / "metrics_comparison.png")
-    plot_training_curves_comparison(results, OUTPUT_DIR / "training_curves_comparison.png")
+    plot_confusion_matrices(results, OUTPUT_DIR / "confusion_matrix_comparison.png")
+    plot_training_curves_comparison(OUTPUT_DIR / "training_curves_comparison.png")
 
     # Save predictions
     save_predictions(results, OUTPUT_DIR)
@@ -330,12 +384,16 @@ def main():
     print("EVALUATION COMPLETE")
     print(f"{'='*80}")
     print(f"\nAll results saved to: {OUTPUT_DIR}")
-    print("\nGenerated files:")
+    print("\nGenerated files in Results/comparison/:")
     print("  - metrics_comparison.csv")
     print("  - metrics_comparison.png")
     print("  - scatter_comparison.png")
+    print("  - confusion_matrix_comparison.png")
     print("  - training_curves_comparison.png")
-    print("  - predictions_*.csv")
+    print("\nGenerated files in Results/predictions/:")
+    print("  - predictions_baseline_test.csv")
+    print("  - predictions_late_fusion_test.csv")
+    print("  - predictions_feature_fusion_test.csv")
 
     return 0
 

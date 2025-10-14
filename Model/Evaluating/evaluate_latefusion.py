@@ -4,8 +4,8 @@ Evaluate the trained Late Fusion model on the test set.
 This script evaluates the late fusion model (averaging predictions from TOP and SIDE views) and generates:
 - Test set MAE and RMSE metrics
 - Scatter plot of predictions vs ground truth
+- Confusion matrix showing prediction distribution
 - Individual predictions saved to CSV
-- Prediction plot saved to Results/plots/
 
 Usage:
     Evaluate with default parameters (test set):
@@ -18,8 +18,9 @@ Usage:
         python Model/Evaluating/evaluate_latefusion.py --split test --batch_size 32
 
 Outputs:
-    - Results/plots/eval_latefusion_scatter.png - Scatter plot
-    - Results/comparison/predictions_late_fusion.csv - All predictions
+    - Results/plots/eval_latefusion_{split}_scatter.png - Scatter plot
+    - Results/plots/eval_latefusion_{split}_confusion_matrix.png - Confusion matrix
+    - Results/predictions/predictions_late_fusion_{split}.csv - All predictions
     - Console output with MAE and RMSE metrics
 
 Requirements:
@@ -38,6 +39,8 @@ from pathlib import Path as _Path
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from sklearn.metrics import confusion_matrix
+import seaborn as sns
 
 # Ensure project root on path
 _project_root = _Path(__file__).resolve().parent.parent.parent
@@ -128,7 +131,7 @@ def main():
     print(f"Best epoch: {ckpt.get('epoch', 'N/A')}")
 
     # Save predictions
-    output_dir = _project_root / "Results" / "comparison"
+    output_dir = _project_root / "Results" / "predictions"
     output_dir.mkdir(parents=True, exist_ok=True)
     csv_output = output_dir / f"predictions_late_fusion_{args.split}.csv"
 
@@ -159,6 +162,27 @@ def main():
     plt.tight_layout()
     plt.savefig(scatter_path, dpi=150)
     print(f"Scatter plot saved to: {scatter_path}")
+
+    # Generate confusion matrix
+    # Round predictions to nearest integer day (1-7)
+    preds_rounded = np.clip(np.round(preds_arr), 1, 7).astype(int)
+    gts_rounded = np.round(gts_arr).astype(int)
+
+    cm = confusion_matrix(gts_rounded, preds_rounded, labels=[1, 2, 3, 4, 5, 6, 7])
+
+    plt.figure(figsize=(8, 7))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Oranges',
+                xticklabels=[1, 2, 3, 4, 5, 6, 7],
+                yticklabels=[1, 2, 3, 4, 5, 6, 7],
+                cbar_kws={'label': 'Count'})
+    plt.xlabel("Predicted Day", fontsize=12)
+    plt.ylabel("Ground Truth Day", fontsize=12)
+    plt.title(f"Late Fusion Model - Confusion Matrix ({args.split.capitalize()} Set)\nMAE: {mae_val:.3f}", fontsize=13)
+    plt.tight_layout()
+
+    cm_path = plot_dir / f"eval_latefusion_{args.split}_confusion_matrix.png"
+    plt.savefig(cm_path, dpi=150)
+    print(f"Confusion matrix saved to: {cm_path}")
 
     print("\n" + "=" * 80)
     print("[SUCCESS] Evaluation complete!")
