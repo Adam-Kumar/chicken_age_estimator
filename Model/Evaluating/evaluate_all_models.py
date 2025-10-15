@@ -8,7 +8,6 @@ This script:
    - Metrics comparison table (MAE, RMSE, params)
    - Side-by-side scatter plots
    - Combined confusion matrices (3 models side-by-side)
-   - Training curves comparison
    - Bar chart comparing metrics
 4. Saves results to Results/comparison/ and Results/predictions/
 
@@ -21,7 +20,6 @@ Outputs:
         - scatter_comparison.png - Side-by-side scatter plots
         - confusion_matrix_comparison.png - Combined confusion matrices
         - metrics_comparison.png - Bar charts (MAE, RMSE)
-        - training_curves_comparison.png - Training curves
     Results/predictions/:
         - predictions_baseline_test.csv
         - predictions_late_fusion_test.csv
@@ -44,7 +42,7 @@ from sklearn.metrics import confusion_matrix
 import seaborn as sns
 
 # Ensure project root on path
-_project_root = _Path(__file__).resolve().parent.parent
+_project_root = _Path(__file__).resolve().parent.parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
@@ -208,32 +206,6 @@ def plot_metrics_comparison(results: Dict, output_path: _Path):
     plt.close()
 
 
-def plot_training_curves_comparison(output_path: _Path):
-    """Load and plot training curves from all models."""
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-
-    for idx, model_type in enumerate(MODEL_CONFIGS.keys()):
-        ax = axes[idx]
-        curve_path = _project_root / "Results" / "training_curves" / f"train_val_mae_{model_type}.png"
-
-        if not curve_path.exists():
-            ax.text(0.5, 0.5, f"Training curve not found\n{curve_path.name}",
-                   ha="center", va="center", transform=ax.transAxes)
-            ax.set_title(MODEL_CONFIGS[model_type]["name"])
-            continue
-
-        # For now, just note where the curves are
-        # In a full implementation, you'd parse and replot the data
-        ax.text(0.5, 0.5, f"See: {curve_path.name}",
-               ha="center", va="center", transform=ax.transAxes)
-        ax.set_title(MODEL_CONFIGS[model_type]["name"])
-
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=150)
-    print(f"Training curves comparison saved to {output_path}")
-    plt.close()
-
-
 def plot_confusion_matrices(results: Dict, output_path: _Path):
     """Create combined confusion matrix visualization for all models."""
     fig, axes = plt.subplots(1, 3, figsize=(20, 6))
@@ -375,7 +347,6 @@ def main():
     plot_scatter_comparison(results, OUTPUT_DIR / "scatter_comparison.png")
     plot_metrics_comparison(results, OUTPUT_DIR / "metrics_comparison.png")
     plot_confusion_matrices(results, OUTPUT_DIR / "confusion_matrix_comparison.png")
-    plot_training_curves_comparison(OUTPUT_DIR / "training_curves_comparison.png")
 
     # Save predictions
     save_predictions(results, OUTPUT_DIR)
@@ -389,7 +360,6 @@ def main():
     print("  - metrics_comparison.png")
     print("  - scatter_comparison.png")
     print("  - confusion_matrix_comparison.png")
-    print("  - training_curves_comparison.png")
     print("\nGenerated files in Results/predictions/:")
     print("  - predictions_baseline_test.csv")
     print("  - predictions_late_fusion_test.csv")
