@@ -17,8 +17,13 @@ This project implements and compares three deep learning architectures for chick
 | **Late Fusion** ⭐ | **0.430 days** | **0.539 days** | 47.0M |
 | Feature Fusion | 0.465 days | 0.569 days | 49.1M |
 | Baseline | 0.490 days | 0.645 days | 23.5M |
+| Human (Pre-calibration) | 1.965 days | 2.487 days | - |
+| Human (Post-calibration) | 2.295 days | 2.796 days | - |
 
-**Finding:** Late fusion outperforms feature fusion on this small dataset (< 1000 samples) due to its simpler ensemble-like averaging strategy.
+**Findings:**
+- Late fusion outperforms feature fusion on this small dataset (< 1000 samples) due to its simpler ensemble-like averaging strategy
+- **All models significantly outperform humans (4-5× lower MAE)**, demonstrating that deep learning captures subtle visual patterns humans cannot
+- Human performance **worsened after calibration** (p=0.0108), suggesting the task is difficult for humans to learn even with reference images
 
 ## Repository Structure
 
@@ -31,6 +36,16 @@ This project implements and compares three deep learning architectures for chick
 │   ├── Evaluating/             # Evaluation scripts
 │   └── checkpoints/            # Trained model checkpoints (not included)
 ├── Results/                    # Example outputs and visualizations
+├── User_Study/                 # Human performance evaluation study
+│   ├── analysis.py             # Statistical analysis script
+│   ├── Chicken Decay Estimation Study.csv  # User study responses
+│   ├── pre_survey_images.txt   # Ground truth for pre-calibration
+│   ├── post_survey_images.txt  # Ground truth for post-calibration
+│   └── Results/                # Analysis outputs
+│       ├── 1_predictions_vs_groundtruth.png
+│       ├── 2_model_vs_human_comparison.png
+│       ├── 3_individual_participant_performance.png
+│       └── participant_detailed_results.csv
 ├── README.md                   # This file
 ├── README_TRAINING.md          # Detailed training guide
 └── requirements.txt            # Python dependencies
@@ -152,6 +167,78 @@ Example outputs in `Results/`:
 - **Metrics table:** MAE, RMSE, parameters comparison
 - **Predictions:** CSV files with individual predictions
 
+## User Study: Model vs Human Performance
+
+### Overview
+
+To validate the model's performance, we conducted a user study comparing human estimation accuracy against the ResNet-50 model. The study involved 20 participants estimating chicken drumette age before and after calibration.
+
+### Study Design
+
+- **Participants:** 20 individuals
+- **Task:** Estimate the age (1-7 days) of chicken drumettes from images
+- **Structure:**
+  - **Pre-calibration:** 10 images without any reference
+  - **Calibration phase:** Participants shown reference images for each day
+  - **Post-calibration:** 10 different images to test improvement
+- **Views:** Both TOP and SIDE view images provided (matching model inputs)
+
+### Key Findings
+
+| Metric | Baseline | Feature Fusion | Late Fusion | Human (Pre-calib) | Human (Post-calib) |
+|--------|----------|----------------|-------------|-------------------|-------------------|
+| **MAE** | 0.490 days | 0.465 days | **0.430 days** | 1.965 days | 2.295 days |
+| **RMSE** | 0.645 days | 0.569 days | **0.539 days** | 2.487 days | 2.796 days |
+| **Exact Accuracy** | - | - | - | 18.5% | 12.0% |
+| **Within ±1 day** | - | - | - | 46.0% | 41.0% |
+
+**Key Findings:**
+
+1. **All models significantly outperform humans:** Even the baseline single-view model (MAE: 0.490) performs 4× better than humans
+2. **Late Fusion is best:** The multi-view Late Fusion model (MAE: 0.430) achieves the lowest error
+3. **Calibration paradoxically hurt performance:** Human accuracy decreased after calibration (MAE: 1.965 → 2.295, p=0.0108)
+   - This suggests reference images may have introduced anchoring bias or confusion
+   - Humans may "overthink" after seeing examples rather than relying on intuition
+   - The task is fundamentally difficult for humans to learn even with training
+4. **Low inter-rater reliability:** ICC scores (0.20 pre, 0.11 post) indicate high disagreement between participants
+
+### Inter-Rater Reliability
+
+- **Pre-calibration ICC:** 0.20 (poor agreement)
+- **Post-calibration ICC:** 0.11 (poor agreement)
+
+Low ICC values indicate high variability between human raters, suggesting the task is challenging even with calibration.
+
+### Running the Analysis
+
+To reproduce the user study analysis:
+
+```bash
+python User_Study/analysis.py
+```
+
+This generates (saved to `User_Study/Results/`):
+- **Statistical metrics:** MAE, RMSE, accuracy, inter-rater reliability printed to console
+- **3 visualization plots:**
+  - Predictions vs ground truth (pre & post calibration)
+  - Model vs human comparison (all 3 architectures + human performance)
+  - Individual participant performance
+- **Detailed CSV:** Per-participant metrics and improvement scores
+
+### Study Files
+
+**Input files:**
+- `Chicken Decay Estimation Study.csv` - Raw survey responses from 20 participants
+- `pre_survey_images.txt` - Ground truth labels for pre-calibration images
+- `post_survey_images.txt` - Ground truth labels for post-calibration images
+- `analysis.py` - Statistical analysis script with full documentation
+
+**Output files (Results/ folder):**
+- `1_predictions_vs_groundtruth.png` - Scatter plots showing human prediction accuracy
+- `2_model_vs_human_comparison.png` - Bar chart comparing all 3 models vs humans
+- `3_individual_participant_performance.png` - Per-participant pre/post comparison
+- `participant_detailed_results.csv` - Complete metrics for each participant
+
 ## Documentation
 
 - **[README_TRAINING.md](README_TRAINING.md)** - Comprehensive training and evaluation guide
@@ -175,6 +262,17 @@ Example outputs in `Results/`:
 - `training_curves/` - Training progress plots
 - `comparison/` - Model comparison visualizations
 - `plots/` - Individual evaluation plots
+
+### User_Study/
+- `analysis.py` - Statistical analysis script with comprehensive metrics
+- `Chicken Decay Estimation Study.csv` - Survey responses from 20 participants
+- `pre_survey_images.txt` - Ground truth for pre-calibration test images (10 images)
+- `post_survey_images.txt` - Ground truth for post-calibration test images (10 images)
+- `Results/` - Analysis outputs:
+  - `1_predictions_vs_groundtruth.png` - Human prediction scatter plots
+  - `2_model_vs_human_comparison.png` - Bar chart with all 3 models vs humans
+  - `3_individual_participant_performance.png` - Per-participant pre/post comparison
+  - `participant_detailed_results.csv` - Detailed metrics for all 20 participants
 
 ## Hardware Recommendations
 
