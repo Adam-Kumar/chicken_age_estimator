@@ -6,9 +6,9 @@ Deep learning models for predicting chicken drumette age (1-7 days) from multi-v
 
 This project implements and compares three deep learning architectures for chicken age regression:
 
-1. **Baseline (ResNetRegressor)** - Single-view ResNet50 model
-2. **Late Fusion** - Averages predictions from TOP and SIDE views ⭐ **Best Performance**
-3. **Feature Fusion** - Concatenates features from both views before prediction
+1. **Baseline (ResNetRegressor)** - ResNet50 model processing individual images (both TOP and SIDE views independently)
+2. **Late Fusion** - Averages predictions from paired TOP and SIDE views ⭐ **Best Performance**
+3. **Feature Fusion** - Concatenates features from paired TOP and SIDE views before prediction
 
 ### Key Results
 
@@ -115,12 +115,14 @@ Please include your name, institution, and intended research purpose.
 
 ## Model Architectures
 
-### Baseline (Single-View)
+### Baseline (Independent Image Processing)
 ```
 Input (224x224x3) → ResNet50 → FC → Age prediction
 ```
-- Fastest training (~20-40 min)
-- Uses individual images independently
+- Processes one image at a time
+- Trained on both TOP and SIDE view images independently (treats them as separate samples)
+- Does not explicitly use view pairing
+- Fastest training (~20-40 min) with 2× training samples (798 images)
 
 ### Late Fusion ⭐ Best Model
 ```
@@ -128,9 +130,11 @@ TOP image → ResNet50 → pred_top ──┐
                                    ├─→ average → final prediction
 SIDE image → ResNet50 → pred_side ─┘
 ```
+- Uses paired TOP and SIDE view images explicitly
+- Trains on 399 image pairs
+- Simple ensemble strategy - averages predictions from both views
 - Best for small datasets
-- Simple ensemble strategy
-- Test MAE: 0.430 days
+- Test MAE: 0.428 days
 
 ### Feature Fusion
 ```
@@ -138,8 +142,11 @@ TOP image → ResNet50 → features_top ──┐
                                        ├─→ concatenate → FC(512) → prediction
 SIDE image → ResNet50 → features_side ─┘
 ```
-- Learns cross-view interactions
+- Uses paired TOP and SIDE view images explicitly
+- Trains on 399 image pairs
+- Learns cross-view interactions by combining features
 - Better for large datasets (>5000 samples)
+- Test MAE: 0.467 days
 
 ## Requirements
 
@@ -197,8 +204,8 @@ To validate the model's performance, we conducted a user study comparing human e
 
 **Key Findings:**
 
-1. **All models significantly outperform humans:** Even the baseline single-view model (MAE: 0.490) performs 4× better than humans
-2. **Late Fusion is best:** The multi-view Late Fusion model (MAE: 0.430) achieves the lowest error
+1. **All models significantly outperform humans:** Even the baseline model (MAE: 0.483) performs 4× better than humans
+2. **Late Fusion is best:** The Late Fusion model (MAE: 0.428) achieves the lowest error
 3. **Calibration paradoxically hurt performance:** Human accuracy decreased after calibration (MAE: 1.965 → 2.295, p=0.0108)
    - This suggests reference images may have introduced anchoring bias or confusion
    - Humans may "overthink" after seeing examples rather than relying on intuition

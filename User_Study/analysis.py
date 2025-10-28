@@ -324,9 +324,9 @@ print("  Saved: Results/1_predictions_vs_groundtruth.png")
 # Figure 2: Model vs Human Comparison - ALL 3 MODELS
 fig, ax = plt.subplots(figsize=(12, 7))
 comparison_data = {
-    'Baseline\n(Single View)': MODEL_MAE_BASELINE,
-    'Feature Fusion\n(Multi-View)': MODEL_MAE_FEATURE_FUSION,
-    'Late Fusion\n(Multi-View)': MODEL_MAE_LATE_FUSION,
+    'Baseline': MODEL_MAE_BASELINE,
+    'Feature Fusion': MODEL_MAE_FEATURE_FUSION,
+    'Late Fusion': MODEL_MAE_LATE_FUSION,
     'Human\n(Pre-Calib)': overall_pre_mae,
     'Human\n(Post-Calib)': overall_post_mae,
     'Best\nHuman': results_df['post_mae'].min(),
