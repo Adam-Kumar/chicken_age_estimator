@@ -51,11 +51,7 @@ plt.rcParams['font.size'] = 10
 # ============================================
 CSV_FILE = SCRIPT_DIR / 'Chicken Decay Estimation Study.csv'
 RESULTS_DIR = SCRIPT_DIR / 'Results'
-
-# Model performance (Test MAE in days)
-MODEL_MAE_BASELINE = 0.490
-MODEL_MAE_FEATURE_FUSION = 0.465
-MODEL_MAE_LATE_FUSION = 0.430
+MODEL_METRICS_CSV = SCRIPT_DIR.parent / 'Results' / 'comparison' / 'metrics_comparison.csv'
 
 # Ground truth for pre and post calibration
 PRE_CALIBRATION_GT = [4, 4, 1, 1, 6, 6, 3, 7, 5, 2]
@@ -63,6 +59,21 @@ POST_CALIBRATION_GT = [7, 7, 3, 3, 1, 1, 4, 6, 5, 2]
 
 # Create Results directory if it doesn't exist
 RESULTS_DIR.mkdir(exist_ok=True)
+
+# Load model performance from the actual results CSV
+try:
+    model_metrics_df = pd.read_csv(MODEL_METRICS_CSV)
+    MODEL_MAE_BASELINE = model_metrics_df[model_metrics_df['Model'] == 'Baseline (ResNet50)']['MAE'].values[0]
+    MODEL_MAE_LATE_FUSION = model_metrics_df[model_metrics_df['Model'] == 'Late Fusion']['MAE'].values[0]
+    MODEL_MAE_FEATURE_FUSION = model_metrics_df[model_metrics_df['Model'] == 'Feature Fusion']['MAE'].values[0]
+    print(f"Loaded model metrics from: {MODEL_METRICS_CSV}")
+except FileNotFoundError:
+    # Fallback to approximate values if CSV not found
+    print(f"Warning: Could not find {MODEL_METRICS_CSV}")
+    print("Using approximate model MAE values. Run evaluate_all_models.py for exact values.")
+    MODEL_MAE_BASELINE = 0.483
+    MODEL_MAE_FEATURE_FUSION = 0.467
+    MODEL_MAE_LATE_FUSION = 0.428
 
 # ============================================
 # LOAD AND PREPARE DATA
