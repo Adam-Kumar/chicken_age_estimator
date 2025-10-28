@@ -163,7 +163,10 @@ Default parameters (optimized for this dataset):
 
 Example outputs in `Results/`:
 - **Training curves:** Loss/MAE progression over epochs
-- **Comparison plots:** Side-by-side scatter plots
+- **Comparison plots:**
+  - Side-by-side scatter plots for all 3 models
+  - Bar charts with unified 0-1 day scale for easy comparison
+  - Combined confusion matrices
 - **Metrics table:** MAE, RMSE, parameters comparison
 - **Predictions:** CSV files with individual predictions
 
@@ -260,7 +263,12 @@ This generates (saved to `User_Study/Results/`):
 
 ### Results/
 - `training_curves/` - Training progress plots
-- `comparison/` - Model comparison visualizations
+- `comparison/` - Model comparison visualizations:
+  - `metrics_comparison.csv` - Performance metrics table
+  - `metrics_comparison.png` - Bar charts (MAE & RMSE with unified 0-1 day scale)
+  - `scatter_comparison.png` - Side-by-side scatter plots for all 3 models
+  - `confusion_matrix_comparison.png` - Combined confusion matrices
+- `predictions/` - Individual model prediction CSV files
 - `plots/` - Individual evaluation plots
 
 ### User_Study/

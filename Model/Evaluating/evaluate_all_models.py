@@ -176,7 +176,7 @@ def plot_scatter_comparison(results: Dict, output_path: _Path):
 
 
 def plot_metrics_comparison(results: Dict, output_path: _Path):
-    """Create bar chart comparing MAE and RMSE."""
+    """Create bar chart comparing MAE and RMSE with unified scale."""
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
 
     models = [MODEL_CONFIGS[mt]["name"] for mt in results.keys()]
@@ -188,17 +188,19 @@ def plot_metrics_comparison(results: Dict, output_path: _Path):
     ax1.bar(models, maes, color=colors, alpha=0.7)
     ax1.set_ylabel("MAE (days)", fontsize=12)
     ax1.set_title("Mean Absolute Error Comparison", fontsize=13, fontweight="bold")
+    ax1.set_ylim(0, 1.0)  # Set y-axis to 0-1 day for consistency
     ax1.grid(True, axis="y", alpha=0.3)
     for i, v in enumerate(maes):
-        ax1.text(i, v + 0.02, f"{v:.3f}", ha="center", va="bottom", fontweight="bold")
+        ax1.text(i, v + 0.03, f"{v:.3f}", ha="center", va="bottom", fontweight="bold")
 
     # RMSE comparison
     ax2.bar(models, rmses, color=colors, alpha=0.7)
     ax2.set_ylabel("RMSE (days)", fontsize=12)
     ax2.set_title("Root Mean Squared Error Comparison", fontsize=13, fontweight="bold")
+    ax2.set_ylim(0, 1.0)  # Set y-axis to 0-1 day for consistency
     ax2.grid(True, axis="y", alpha=0.3)
     for i, v in enumerate(rmses):
-        ax2.text(i, v + 0.02, f"{v:.3f}", ha="center", va="bottom", fontweight="bold")
+        ax2.text(i, v + 0.03, f"{v:.3f}", ha="center", va="bottom", fontweight="bold")
 
     plt.tight_layout()
     plt.savefig(output_path, dpi=150)
