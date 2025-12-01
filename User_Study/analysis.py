@@ -1,34 +1,11 @@
 """analysis.py
 Statistical analysis script for chicken age estimation user study.
 
-Analyzes human performance on chicken drumette age estimation before and after
-calibration, comparing results with the ResNet-50 model. Generates comprehensive
-metrics, statistical tests, and visualizations.
-
-Usage:
-    Run this script from any directory:
-
-    ```
-    python User_Study/analysis.py
-    ```
-
-    Or from within the User_Study directory:
-
-    ```
-    cd User_Study
-    python analysis.py
-    ```
-
-Inputs:
-- Chicken Decay Estimation Study.csv (user study responses)
-- pre_survey_images.txt (ground truth for pre-calibration images)
-- post_survey_images.txt (ground truth for post-calibration images)
-
-Outputs (saved to Results/ folder):
-- 1_predictions_vs_groundtruth.png
-- 2_model_vs_human_comparison.png (includes all 3 model architectures)
-- 3_individual_participant_performance.png
-- participant_detailed_results.csv
+Generates:
+- Confusion matrices (ConvNeXt-T Feature Fusion, Human Pre/Post)
+- Bar graph comparison (ConvNeXt vs Human)
+- Individual participant performance
+- Metrics CSV
 """
 
 from pathlib import Path
@@ -37,355 +14,215 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy import stats
+from sklearn.metrics import r2_score, confusion_matrix
 
-# Get the directory where this script is located
+# =========================
+# CONFIG
+# =========================
 SCRIPT_DIR = Path(__file__).resolve().parent
+RESULTS_DIR = SCRIPT_DIR / 'Results'
+CSV_FILE = SCRIPT_DIR / 'Chicken Decay Estimation Study.csv'
+PRE_CALIBRATION_GT = [4, 4, 1, 1, 6, 6, 3, 7, 5, 2]
+POST_CALIBRATION_GT = [7, 7, 3, 3, 1, 1, 4, 6, 5, 2]
 
-# Set style for better-looking plots
+RESULTS_DIR.mkdir(exist_ok=True)
 sns.set_style("whitegrid")
 plt.rcParams['figure.figsize'] = (12, 8)
 plt.rcParams['font.size'] = 10
 
-# ============================================
-# CONFIGURATION - Update these as needed
-# ============================================
-CSV_FILE = SCRIPT_DIR / 'Chicken Decay Estimation Study.csv'
-RESULTS_DIR = SCRIPT_DIR / 'Results'
-MODEL_METRICS_CSV = SCRIPT_DIR.parent / 'Results' / 'comparison' / 'metrics_comparison.csv'
-
-# Ground truth for pre and post calibration
-PRE_CALIBRATION_GT = [4, 4, 1, 1, 6, 6, 3, 7, 5, 2]
-POST_CALIBRATION_GT = [7, 7, 3, 3, 1, 1, 4, 6, 5, 2]
-
-# Create Results directory if it doesn't exist
-RESULTS_DIR.mkdir(exist_ok=True)
-
-# Load model performance from the actual results CSV
-try:
-    model_metrics_df = pd.read_csv(MODEL_METRICS_CSV)
-    MODEL_MAE_BASELINE = model_metrics_df[model_metrics_df['Model'] == 'Baseline (ResNet50)']['MAE'].values[0]
-    MODEL_MAE_LATE_FUSION = model_metrics_df[model_metrics_df['Model'] == 'Late Fusion']['MAE'].values[0]
-    MODEL_MAE_FEATURE_FUSION = model_metrics_df[model_metrics_df['Model'] == 'Feature Fusion']['MAE'].values[0]
-    print(f"Loaded model metrics from: {MODEL_METRICS_CSV}")
-except FileNotFoundError:
-    # Fallback to approximate values if CSV not found
-    print(f"Warning: Could not find {MODEL_METRICS_CSV}")
-    print("Using approximate model MAE values. Run evaluate_all_models.py for exact values.")
-    MODEL_MAE_BASELINE = 0.483
-    MODEL_MAE_FEATURE_FUSION = 0.467
-    MODEL_MAE_LATE_FUSION = 0.428
-
-# ============================================
-# LOAD AND PREPARE DATA
-# ============================================
-print("Loading data...")
+# =========================
+# LOAD DATA
+# =========================
 df = pd.read_csv(CSV_FILE)
-
-# Get column indices for predictions
-# Pre-calibration: columns 6-15 (index 5-14) - 10 prediction columns
-# Note: Column 5 (index 4) is "How often do you cook chicken?" which we skip
-# Column 16 (index 15) is confidence question, which we skip
-# Post-calibration: columns 17-26 (index 16-25) - 10 prediction columns
 pre_cols = df.columns[5:15]
 post_cols = df.columns[16:26]
 
-print(f"Total participants: {len(df)}")
-print(f"Pre-calibration columns: {len(pre_cols)}")
-print(f"Post-calibration columns: {len(post_cols)}")
-
-# ============================================
-# EXTRACT PREDICTIONS
-# ============================================
-# Convert predictions to numeric values (in case they're stored as strings)
-pre_predictions = df[pre_cols].apply(pd.to_numeric, errors='coerce').values  # Shape: (n_participants, 10)
-post_predictions = df[post_cols].apply(pd.to_numeric, errors='coerce').values  # Shape: (n_participants, 10)
-
-# Convert to numpy arrays
+pre_predictions = df[pre_cols].apply(pd.to_numeric, errors='coerce').values
+post_predictions = df[post_cols].apply(pd.to_numeric, errors='coerce').values
 pre_gt = np.array(PRE_CALIBRATION_GT)
 post_gt = np.array(POST_CALIBRATION_GT)
-
-# ============================================
-# CALCULATE METRICS
-# ============================================
-def calculate_mae(predictions, ground_truth):
-    """Calculate Mean Absolute Error.
-
-    Args:
-        predictions: Array of predicted values
-        ground_truth: Array of true values
-
-    Returns:
-        Mean absolute error as a float
-    """
-    return np.mean(np.abs(predictions - ground_truth))
-
-def calculate_rmse(predictions, ground_truth):
-    """Calculate Root Mean Squared Error.
-
-    Args:
-        predictions: Array of predicted values
-        ground_truth: Array of true values
-
-    Returns:
-        Root mean squared error as a float
-    """
-    return np.sqrt(np.mean((predictions - ground_truth) ** 2))
-
-def calculate_accuracy(predictions, ground_truth, tolerance=0):
-    """Calculate accuracy within tolerance.
-
-    Args:
-        predictions: Array of predicted values
-        ground_truth: Array of true values
-        tolerance: Maximum allowed error to count as correct (default: 0 for exact match)
-
-    Returns:
-        Accuracy as a float between 0 and 1
-    """
-    return np.mean(np.abs(predictions - ground_truth) <= tolerance)
-
-# Per-participant metrics
 n_participants = len(df)
-participant_results = []
 
+# =========================
+# METRIC FUNCTIONS
+# =========================
+def calculate_mae(preds, gt): return np.mean(np.abs(preds - gt))
+def calculate_rmse(preds, gt): return np.sqrt(np.mean((preds - gt)**2))
+def calculate_accuracy(preds, gt, tol=0): return np.mean(np.abs(preds - gt) <= tol)
+def calculate_r2(preds, gt): return r2_score(gt, preds)
+def calculate_r(preds, gt): return stats.pearsonr(preds, gt)[0]
+
+# =========================
+# PER PARTICIPANT METRICS
+# =========================
+participant_results = []
 for i in range(n_participants):
     pre_mae = calculate_mae(pre_predictions[i], pre_gt)
-    pre_rmse = calculate_rmse(pre_predictions[i], pre_gt)
-    pre_acc_exact = calculate_accuracy(pre_predictions[i], pre_gt, tolerance=0)
-    pre_acc_1day = calculate_accuracy(pre_predictions[i], pre_gt, tolerance=1)
-    
     post_mae = calculate_mae(post_predictions[i], post_gt)
-    post_rmse = calculate_rmse(post_predictions[i], post_gt)
-    post_acc_exact = calculate_accuracy(post_predictions[i], post_gt, tolerance=0)
-    post_acc_1day = calculate_accuracy(post_predictions[i], post_gt, tolerance=1)
-    
     participant_results.append({
-        'participant_id': i + 1,
+        'participant_id': i+1,
         'pre_mae': pre_mae,
-        'pre_rmse': pre_rmse,
-        'pre_acc_exact': pre_acc_exact,
-        'pre_acc_1day': pre_acc_1day,
         'post_mae': post_mae,
-        'post_rmse': post_rmse,
-        'post_acc_exact': post_acc_exact,
-        'post_acc_1day': post_acc_1day,
         'improvement': pre_mae - post_mae
     })
-
 results_df = pd.DataFrame(participant_results)
 
-# Overall metrics
-print("\n" + "="*60)
-print("OVERALL PERFORMANCE METRICS")
-print("="*60)
-
-# Pre-calibration
 all_pre_predictions = pre_predictions.flatten()
-all_pre_gt = np.tile(pre_gt, n_participants)
-overall_pre_mae = calculate_mae(all_pre_predictions, all_pre_gt)
-overall_pre_rmse = calculate_rmse(all_pre_predictions, all_pre_gt)
-overall_pre_acc_exact = calculate_accuracy(all_pre_predictions, all_pre_gt, 0)
-overall_pre_acc_1day = calculate_accuracy(all_pre_predictions, all_pre_gt, 1)
-
-print(f"\nPRE-CALIBRATION:")
-print(f"  MAE: {overall_pre_mae:.3f} days")
-print(f"  RMSE: {overall_pre_rmse:.3f} days")
-print(f"  Exact Accuracy: {overall_pre_acc_exact*100:.1f}%")
-print(f"  Within ±1 day: {overall_pre_acc_1day*100:.1f}%")
-
-# Post-calibration
 all_post_predictions = post_predictions.flatten()
+all_pre_gt = np.tile(pre_gt, n_participants)
 all_post_gt = np.tile(post_gt, n_participants)
-overall_post_mae = calculate_mae(all_post_predictions, all_post_gt)
-overall_post_rmse = calculate_rmse(all_post_predictions, all_post_gt)
-overall_post_acc_exact = calculate_accuracy(all_post_predictions, all_post_gt, 0)
-overall_post_acc_1day = calculate_accuracy(all_post_predictions, all_post_gt, 1)
 
-print(f"\nPOST-CALIBRATION:")
-print(f"  MAE: {overall_post_mae:.3f} days")
-print(f"  RMSE: {overall_post_rmse:.3f} days")
-print(f"  Exact Accuracy: {overall_post_acc_exact*100:.1f}%")
-print(f"  Within ±1 day: {overall_post_acc_1day*100:.1f}%")
+# =========================
+# LOAD CONVNEXT PREDICTIONS
+# =========================
+convnext_csv_file = SCRIPT_DIR.parent / 'Results' / 'convnext_t' / 'csv' / 'predictions.csv'
+convnext_df = pd.read_csv(convnext_csv_file)
 
-print(f"\nIMPROVEMENT AFTER CALIBRATION:")
-print(f"  MAE reduction: {overall_pre_mae - overall_post_mae:.3f} days ({(overall_pre_mae - overall_post_mae)/overall_pre_mae*100:.1f}%)")
+convnext_preds = convnext_df['predicted_age'].values
+convnext_targets = convnext_df['actual_age'].values
 
-# Statistical test
-t_stat, p_value = stats.ttest_rel(results_df['pre_mae'], results_df['post_mae'])
-print(f"  Paired t-test p-value: {p_value:.4f} {'(significant)' if p_value < 0.05 else '(not significant)'}")
+# =========================
+# CALCULATE METRICS CSV
+# =========================
+metrics = []
+datasets = [
+    ('Best Model', convnext_preds, convnext_targets),
+    ('Pre-Calibration', all_pre_predictions, all_pre_gt),
+    ('Post-Calibration', all_post_predictions, all_post_gt)
+]
 
-print(f"\nMODEL vs HUMAN COMPARISON:")
-print(f"  Baseline Model MAE: {MODEL_MAE_BASELINE:.3f} days")
-print(f"  Feature Fusion Model MAE: {MODEL_MAE_FEATURE_FUSION:.3f} days")
-print(f"  Late Fusion Model MAE: {MODEL_MAE_LATE_FUSION:.3f} days")
-print(f"  Human (pre-calib) MAE: {overall_pre_mae:.3f} days")
-print(f"  Human (post-calib) MAE: {overall_post_mae:.3f} days")
-print(f"  Best human MAE: {results_df['post_mae'].min():.3f} days")
-print(f"  Worst human MAE: {results_df['post_mae'].max():.3f} days")
+for name, preds, gt in datasets:
+    mae = calculate_mae(preds, gt)
+    rmse = calculate_rmse(preds, gt)
+    r2 = calculate_r2(preds, gt)
+    r = calculate_r(preds, gt)
+    acc = calculate_accuracy(np.round(preds), gt)
+    metrics.append({'dataset': name, 'MAE': mae, 'RMSE': rmse, 'R²': r2, 'R': r, 'Accuracy': acc})
 
-# ============================================
-# INTER-RATER RELIABILITY
-# ============================================
-print(f"\nINTER-RATER RELIABILITY:")
+metrics_df = pd.DataFrame(metrics)
+metrics_df.to_csv(RESULTS_DIR / 'metrics_summary.csv', index=False)
+print("Saved metrics_summary.csv")
 
-def calculate_icc(predictions):
-    """Calculate Intraclass Correlation Coefficient (ICC).
+def plot_confusion_matrix_comparison(convnext_preds, convnext_targets,
+                                     pre_predictions, pre_gt,
+                                     post_predictions, post_gt,
+                                     results_dir):
+    """Plot 3 normalized confusion matrices side by side with standardized color scale."""
 
-    Uses ICC(2,1) - two-way random effects model with absolute agreement
-    for a single rater. Measures inter-rater reliability.
+    # Round predictions to nearest integer
+    conv_preds = np.round(convnext_preds).astype(int)
+    conv_targets = convnext_targets.astype(int)
+    pre_preds = np.round(pre_predictions.flatten()).astype(int)
+    pre_targets = np.tile(pre_gt, len(pre_predictions))
+    post_preds = np.round(post_predictions.flatten()).astype(int)
+    post_targets = np.tile(post_gt, len(post_predictions))
 
-    Args:
-        predictions: 2D array of shape (n_raters, n_items)
+    labels = [1, 2, 3, 4, 5, 6, 7]
 
-    Returns:
-        ICC value as a float. Values closer to 1 indicate higher agreement.
-        - < 0.5: Poor agreement
-        - 0.5-0.75: Moderate agreement
-        - 0.75-0.9: Good agreement
-        - > 0.9: Excellent agreement
-    """
-    n_raters = predictions.shape[0]
-    n_items = predictions.shape[1]
+    # Compute normalized confusion matrices
+    def normalized_cm(targets, preds):
+        cm = confusion_matrix(targets, preds, labels=labels)
+        return cm.astype(float) / cm.sum(axis=1)[:, np.newaxis]
 
-    # Calculate between-item variance
-    item_means = np.mean(predictions, axis=0)
-    grand_mean = np.mean(predictions)
-    between_item_var = np.sum((item_means - grand_mean)**2) * n_raters / (n_items - 1)
+    cms = [normalized_cm(conv_targets, conv_preds),
+           normalized_cm(pre_targets, pre_preds),
+           normalized_cm(post_targets, post_preds)]
 
-    # Calculate within-item variance
-    within_item_var = np.sum((predictions - item_means)**2) / (n_items * (n_raters - 1))
+    # Compute accuracies
+    accuracies = [np.mean(conv_preds == conv_targets),
+                  np.mean(pre_preds == pre_targets),
+                  np.mean(post_preds == post_targets)]
 
-    # ICC(2,1)
-    icc = (between_item_var - within_item_var) / (between_item_var + (n_raters - 1) * within_item_var)
-    return icc
+    titles = ['Best Model', 'Pre-Calibration', 'Post-Calibration']
 
-pre_icc = calculate_icc(pre_predictions)
-post_icc = calculate_icc(post_predictions)
+    # Determine global min/max for color normalization (0–1)
+    vmin, vmax = 0, 1
 
-print(f"  Pre-calibration ICC: {pre_icc:.3f}")
-print(f"  Post-calibration ICC: {post_icc:.3f}")
+    fig, axes = plt.subplots(1, 3, figsize=(24, 8))
+    fig.suptitle('Confusion Matrix Comparison', fontsize=30, fontweight='bold')
 
-# Standard deviation across raters
-pre_std = np.mean(np.std(pre_predictions, axis=0))
-post_std = np.mean(np.std(post_predictions, axis=0))
-print(f"  Pre-calibration avg std: {pre_std:.3f} days")
-print(f"  Post-calibration avg std: {post_std:.3f} days")
+    for i, ax in enumerate(axes):
+        sns.heatmap(cms[i], annot=True, fmt='.2f', cmap='Blues',
+                    xticklabels=labels, yticklabels=labels,
+                    ax=ax, square=True, linewidths=0, linecolor=None,
+                    vmin=vmin, vmax=vmax, cbar=False)
 
-# ============================================
-# PERFORMANCE BY DECAY DAY
-# ============================================
-print(f"\nPERFORMANCE BY ACTUAL DECAY DAY:")
+        ax.set_title(f"{titles[i]}\nAccuracy: {accuracies[i]*100:.1f}%", fontsize=28, fontweight='bold')
+        ax.set_xlabel('Predicted Age (days)', fontsize=24, fontweight='bold')
+        ax.set_ylabel('Actual Age (days)', fontsize=24, fontweight='bold')
+        ax.tick_params(axis='both', labelsize=20)
 
-all_days = np.concatenate([pre_gt, post_gt])
-all_predictions_combined = np.concatenate([all_pre_predictions, all_post_predictions])
-all_gt_combined = np.concatenate([all_pre_gt, all_post_gt])
+    # Add single colorbar to the right
+    cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])
+    norm = plt.cm.ScalarMappable(cmap='Blues', norm=plt.Normalize(vmin=vmin, vmax=vmax))
+    norm.set_array([])
+    cbar = fig.colorbar(norm, cax=cbar_ax)
+    cbar.set_label('Proportion', fontsize=20)
+    cbar.ax.tick_params(labelsize=20)
 
-for day in range(1, 8):
-    mask = all_gt_combined == day
-    if np.sum(mask) > 0:
-        day_mae = calculate_mae(all_predictions_combined[mask], all_gt_combined[mask])
-        day_std = np.std(all_predictions_combined[mask])
-        print(f"  Day {day}: MAE = {day_mae:.3f}, Std = {day_std:.3f} (n={np.sum(mask)})")
+    plt.tight_layout(rect=[0, 0, 0.9, 0.95])
+    plt.savefig(results_dir / '1_confusion_matrix_comparison.png', dpi=300, bbox_inches='tight')
+    print("Saved 1_confusion_matrix_comparison.png")
+    plt.close()
 
-# ============================================
-# VISUALIZATIONS
-# ============================================
-print("\nGenerating visualizations...")
+# Call the function
+plot_confusion_matrix_comparison(convnext_preds, convnext_targets,
+                                 pre_predictions, pre_gt,
+                                 post_predictions, post_gt,
+                                 RESULTS_DIR)
 
-# Figure 1: Scatter plots - Predictions vs Ground Truth
-fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+# =========================
+# BAR GRAPH COMPARISON
+# =========================
+best_human = results_df['post_mae'].min()
+worst_human = results_df['post_mae'].max()
+bar_labels = ['Best Model', 'Pre-Calibration', 'Post-Calibration', 'Best Human', 'Worst Human']
+bar_values = [
+    calculate_mae(convnext_preds, convnext_targets),
+    calculate_mae(all_pre_predictions, all_pre_gt),
+    calculate_mae(all_post_predictions, all_post_gt),
+    best_human,
+    worst_human
+]
 
-# Pre-calibration
-axes[0].scatter(all_pre_gt, all_pre_predictions, alpha=0.5, s=50)
-axes[0].plot([0, 7], [0, 7], 'r--', linewidth=2, label='Perfect prediction')
-axes[0].set_xlabel('Ground Truth (Days)', fontsize=12, fontweight='bold')
-axes[0].set_ylabel('Human Prediction (Days)', fontsize=12, fontweight='bold')
-axes[0].set_title(f'Pre-Calibration\nMAE: {overall_pre_mae:.3f} days', fontsize=14, fontweight='bold')
-axes[0].legend()
-axes[0].grid(True, alpha=0.3)
-axes[0].set_xlim(-0.5, 7.5)
-axes[0].set_ylim(-0.5, 7.5)
-
-# Post-calibration
-axes[1].scatter(all_post_gt, all_post_predictions, alpha=0.5, s=50, color='green')
-axes[1].plot([0, 7], [0, 7], 'r--', linewidth=2, label='Perfect prediction')
-axes[1].set_xlabel('Ground Truth (Days)', fontsize=12, fontweight='bold')
-axes[1].set_ylabel('Human Prediction (Days)', fontsize=12, fontweight='bold')
-axes[1].set_title(f'Post-Calibration\nMAE: {overall_post_mae:.3f} days', fontsize=14, fontweight='bold')
-axes[1].legend()
-axes[1].grid(True, alpha=0.3)
-axes[1].set_xlim(-0.5, 7.5)
-axes[1].set_ylim(-0.5, 7.5)
-
-plt.tight_layout()
-plt.savefig(RESULTS_DIR / '1_predictions_vs_groundtruth.png', dpi=300, bbox_inches='tight')
-print("  Saved: Results/1_predictions_vs_groundtruth.png")
-
-# Figure 2: Model vs Human Comparison - ALL 3 MODELS
-fig, ax = plt.subplots(figsize=(12, 7))
-comparison_data = {
-    'Baseline': MODEL_MAE_BASELINE,
-    'Feature Fusion': MODEL_MAE_FEATURE_FUSION,
-    'Late Fusion': MODEL_MAE_LATE_FUSION,
-    'Human\n(Pre-Calib)': overall_pre_mae,
-    'Human\n(Post-Calib)': overall_post_mae,
-    'Best\nHuman': results_df['post_mae'].min(),
-    'Worst\nHuman': results_df['post_mae'].max()
-}
-
-bars = ax.bar(comparison_data.keys(), comparison_data.values(),
-               color=['#1f77b4', '#17becf', '#2ca02c', '#ff7f0e', '#ffbb78', '#d62728', '#9467bd'])
-ax.set_ylabel('Mean Absolute Error (Days)', fontsize=12, fontweight='bold')
-ax.set_title('Model vs Human Performance Comparison', fontsize=14, fontweight='bold')
+fig, ax = plt.subplots(figsize=(12,7))
+bars = ax.bar(bar_labels, bar_values,
+              color=['#1f77b4','#ff7f0e','#ffbb78','#2ca02c','#d62728'])
+ax.set_ylabel('Mean Absolute Error (Days)', fontsize=24, fontweight='bold')
+ax.set_title('Best Model vs Human Performance', fontsize=28, fontweight='bold')
 ax.grid(True, alpha=0.3, axis='y')
 
-# Add value labels on bars
+# Add value labels
 for bar in bars:
     height = bar.get_height()
-    ax.text(bar.get_x() + bar.get_width()/2., height,
-            f'{height:.3f}',
-            ha='center', va='bottom', fontweight='bold', fontsize=10)
+    ax.text(bar.get_x()+bar.get_width()/2, height, f'{height:.3f}', ha='center', va='bottom', fontsize=20)
 
-# Add a horizontal line to separate models from humans
-ax.axvline(x=2.5, color='gray', linestyle='--', linewidth=1.5, alpha=0.5)
-ax.text(1.5, ax.get_ylim()[1] * 0.95, 'Models', ha='center', fontsize=11, fontweight='bold', color='gray')
-ax.text(4.5, ax.get_ylim()[1] * 0.95, 'Humans', ha='center', fontsize=11, fontweight='bold', color='gray')
-
+ax.tick_params(axis='x', labelsize=20)
+ax.tick_params(axis='y', labelsize=20)
 plt.tight_layout()
-plt.savefig(RESULTS_DIR / '2_model_vs_human_comparison.png', dpi=300, bbox_inches='tight')
-print("  Saved: Results/2_model_vs_human_comparison.png")
+plt.savefig(RESULTS_DIR / '2_bar_comparison.png', dpi=300, bbox_inches='tight')
+plt.close()
+print("Saved 2_bar_comparison.png")
 
-# Figure 3: Pre vs Post Calibration for Each Participant
-fig, ax = plt.subplots(figsize=(12, 6))
+# =========================
+# INDIVIDUAL PARTICIPANT PERFORMANCE
+# =========================
+fig, ax = plt.subplots(figsize=(12,6))
 x = np.arange(len(results_df))
 width = 0.35
-
-bars1 = ax.bar(x - width/2, results_df['pre_mae'], width, label='Pre-Calibration', color='coral')
-bars2 = ax.bar(x + width/2, results_df['post_mae'], width, label='Post-Calibration', color='lightgreen')
-
-ax.set_xlabel('Participant ID', fontsize=12, fontweight='bold')
-ax.set_ylabel('Mean Absolute Error (Days)', fontsize=12, fontweight='bold')
-ax.set_title('Individual Participant Performance: Pre vs Post Calibration', fontsize=14, fontweight='bold')
+ax.bar(x - width/2, results_df['pre_mae'], width, label='Pre-Calibration', color='coral')
+ax.bar(x + width/2, results_df['post_mae'], width, label='Post-Calibration', color='lightgreen')
+ax.set_xlabel('Participant ID', fontsize=24, fontweight='bold')
+ax.set_ylabel('MAE (Days)', fontsize=24, fontweight='bold')
+ax.set_title('Individual Participant Performance', fontsize=28, fontweight='bold')
 ax.set_xticks(x)
 ax.set_xticklabels(results_df['participant_id'])
-ax.legend()
+ax.legend(fontsize=20)
 ax.grid(True, alpha=0.3, axis='y')
-
+ax.tick_params(axis='both', labelsize=20)
 plt.tight_layout()
 plt.savefig(RESULTS_DIR / '3_individual_participant_performance.png', dpi=300, bbox_inches='tight')
-print("  Saved: Results/3_individual_participant_performance.png")
+plt.close()
+print("Saved 3_individual_participant_performance.png")
 
-# ============================================
-# SAVE DETAILED RESULTS
-# ============================================
-results_df.to_csv(RESULTS_DIR / 'participant_detailed_results.csv', index=False)
-print("\n  Saved: Results/participant_detailed_results.csv")
-
-print("\n" + "="*60)
-print("ANALYSIS COMPLETE!")
-print("="*60)
-print(f"\nGenerated files in Results/ folder:")
-print("  - 1_predictions_vs_groundtruth.png")
-print("  - 2_model_vs_human_comparison.png (includes all 3 models)")
-print("  - 3_individual_participant_performance.png")
-print("  - participant_detailed_results.csv")
+print("\nANALYSIS COMPLETE!")

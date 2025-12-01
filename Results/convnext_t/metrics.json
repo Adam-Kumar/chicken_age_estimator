@@ -1,0 +1,10 @@
+{
+  "model": "ConvNeXt-T Feature Fusion",
+  "strategy": "Feature Fusion",
+  "test_mae": 0.20431770384311676,
+  "test_mse": 0.04174572410372357,
+  "test_rmse": 0.2637636959552765,
+  "r2_score": 0.9826071858406067,
+  "correlation": 0.9918414354324341,
+  "test_samples": 91
+}

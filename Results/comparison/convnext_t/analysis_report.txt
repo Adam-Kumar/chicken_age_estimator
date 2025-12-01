@@ -1,0 +1,31 @@
+================================================================================
+STATISTICAL ANALYSIS: ConvNeXt-T Strategy Comparison
+================================================================================
+
+Test Set Performance Ranking (by MAE):
+--------------------------------------------------------------------------------
+1. Late Fusion          MAE: 0.1813 days
+2. Feature Fusion       MAE: 0.2043 days
+3. TOP View             MAE: 0.2046 days
+4. Baseline             MAE: 0.3098 days
+5. SIDE View            MAE: 0.4964 days
+
+--------------------------------------------------------------------------------
+Best Strategy: Late Fusion
+Best Test MAE: 0.1813 days
+
+Improvement of Best Model over Others:
+--------------------------------------------------------------------------------
+  vs Feature Fusion        11.24% improvement (+0.0230 days)
+  vs TOP View              11.37% improvement (+0.0233 days)
+  vs Baseline              41.46% improvement (+0.1285 days)
+  vs SIDE View             63.47% improvement (+0.3150 days)
+
+--------------------------------------------------------------------------------
+Single-View vs Multi-View Fusion:
+--------------------------------------------------------------------------------
+Average Single-View MAE: 0.3505 days
+Average Fusion MAE:      0.2318 days
+Fusion improves over single-view by 33.86%
+
+================================================================================

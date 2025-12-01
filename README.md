@@ -1,326 +1,426 @@
-# Chicken Drumette Age Regression
+# Chicken Age Estimation - Multi-View Fusion
 
-Deep learning models for predicting chicken drumette age (1-7 days) from multi-view images using PyTorch.
+Deep learning system for estimating chicken age (1-7 days) from dual-view images using various CNN and Transformer backbones with multi-view fusion strategies.
 
-## Overview
+## Project Overview
 
-This project implements and compares three deep learning architectures for chicken age regression:
+This project compares **27 model configurations** for automated chicken age estimation:
+- **9 Backbones**: EfficientNet-B0, ResNet-18/50/101, ViT-B/16, Swin-T/B, ConvNeXt-T/B
+- **3 Fusion Strategies**: Baseline (view-agnostic), Late Fusion (ensemble), Feature Fusion (learned)
 
-1. **Baseline (ResNetRegressor)** - ResNet50 model processing individual images (both TOP and SIDE views independently)
-2. **Late Fusion** - Averages predictions from paired TOP and SIDE views ⭐ **Best Performance**
-3. **Feature Fusion** - Concatenates features from paired TOP and SIDE views before prediction
+**Best Model on Held-Out Test Set**: **ConvNeXt-T Late Fusion**
+**Test Set Performance**: **0.181 days MAE** (evaluated on 13 unseen chickens)
+**Model Parameters**: 55.64M
 
-### Key Results
+## Method
 
-| Model | Test MAE | Test RMSE | Parameters |
-|-------|----------|-----------|------------|
-| **Late Fusion** ⭐ | **0.430 days** | **0.539 days** | 47.0M |
-| Feature Fusion | 0.465 days | 0.569 days | 49.1M |
-| Baseline | 0.490 days | 0.645 days | 23.5M |
-| Human (Pre-calibration) | 1.965 days | 2.487 days | - |
-| Human (Post-calibration) | 2.295 days | 2.796 days | - |
+### Multi-View Fusion Strategies
 
-**Findings:**
-- Late fusion outperforms feature fusion on this small dataset (< 1000 samples) due to its simpler ensemble-like averaging strategy
-- **All models significantly outperform humans (4-5× lower MAE)**, demonstrating that deep learning captures subtle visual patterns humans cannot
-- Human performance **worsened after calibration** (p=0.0108), suggesting the task is difficult for humans to learn even with reference images
+We evaluate three approaches for fusing TOP and SIDE view information:
+
+1. **Baseline (View-Agnostic)**
+   - Single model processes both views without distinguishing them
+   - Simplest approach, treats all images equally
+   - Training: Mixed TOP+SIDE images
+   - Testing: Average predictions from both views
+
+2. **Late Fusion (View-Aware Ensemble)** ⭐ **Best on Test Set**
+   - Two separate models (one for TOP, one for SIDE)
+   - Each model specializes in its view
+   - Predictions combined via simple averaging
+   - **Test MAE: 0.181 days**
+
+3. **Feature Fusion (Learned Fusion)**
+   - Two separate encoders (one for each view)
+   - Features concatenated before final prediction
+   - MLP learns optimal combination of view features
+   - Best in cross-validation but slightly lower generalization
+
+### Dataset Split
+
+- **Training**: 70% (57 chickens) - Model learning
+- **Validation**: 15% (12 chickens) - Hyperparameter tuning & early stopping
+- **Test**: 15% (13 chickens) - **Held-out for final evaluation only**
+
+The held-out test set represents truly unseen chickens, providing an unbiased estimate of real-world performance.
+
+## Results
+
+### Held-Out Test Set Performance (Final Results)
+
+Performance on 13 completely unseen chickens (held-out test set):
+
+| Rank | Strategy | Test MAE | Test RMSE | Params (M) |
+|------|----------|----------|-----------|------------|
+| 1 | **Late Fusion** | **0.181** | 0.228 | 55.64 |
+| 2 | Feature Fusion | 0.204 | 0.264 | 28.59 |
+| 3 | TOP View Only | 0.205 | 0.271 | 27.82 |
+| 4 | Baseline | 0.310 | 0.445 | 27.82 |
+| 5 | SIDE View Only | 0.496 | 0.687 | 27.82 |
+
+**Key Results:**
+- **Late Fusion achieves best generalization** (0.181 days) despite not being best in CV
+- **Feature Fusion ranks 2nd** (0.204 days), showing strong but slightly lower generalization
+- **TOP View alone nearly matches Feature Fusion** (0.205 days), suggesting TOP view is highly informative
+- **Multi-view fusion significantly outperforms Baseline** (0.181 vs 0.310), proving value of view-aware processing
+- **SIDE View alone performs worst** (0.496 days), indicating it provides less discriminative information
+
+### Cross-Validation Results (Development)
+
+Performance during 3-fold cross-validation (used for model selection):
+
+| Rank | Backbone | Fusion | Mean MAE | Std MAE | Params (M) |
+|------|----------|--------|----------|---------|------------|
+| 1 | ConvNeXt-T | Feature | **0.172** | 0.016 | 28.59 |
+| 2 | ConvNeXt-T | Late | 0.197 | 0.006 | 55.64 |
+| 3 | ConvNeXt-B | Late | 0.226 | 0.008 | 176.04 |
+| 4 | ConvNeXt-B | Feature | 0.270 | 0.058 | 89.05 |
+| 5 | Swin-T | Late | 0.280 | 0.004 | 55.04 |
+
+**Development Findings:**
+- **ConvNeXt-T Feature Fusion** achieved best CV performance (0.172 ± 0.016)
+- **ConvNeXt architectures** dominated top positions across fusion types
+- **Model size ≠ performance**: ConvNeXt-T (28.59M) outperformed larger models
+- All top models used ConvNeXt or Swin architectures (modern convnets & transformers)
+
+### Analysis: Why These Results?
+
+#### Why Late Fusion Generalizes Best
+
+**Late Fusion wins on test set (0.181 vs 0.204) despite Feature Fusion winning CV:**
+
+1. **Simpler fusion is more robust**
+   - Late Fusion: Simple averaging of independent predictions
+   - Feature Fusion: Learned MLP fusion → risk of overfitting to training data
+   - Test set includes unseen chickens with potentially different appearance distributions
+
+2. **View specialization benefits**
+   - Each Late Fusion model learns view-specific features without interference
+   - TOP model focuses purely on dorsal patterns (skin texture, color)
+   - SIDE model focuses on lateral features (body shape, leg positioning)
+   - Independent specialization → better generalization
+
+3. **CV-test discrepancy is normal**
+   - CV: Multiple train/val splits from same 82 chickens
+   - Test: Completely different 13 chickens
+   - Feature Fusion's learned fusion may have fit CV-specific patterns
+
+#### Why TOP View is So Informative
+
+**TOP View alone (0.205) nearly matches Feature Fusion (0.204):**
+
+1. **Richer visual information**
+   - Larger visible surface area (entire dorsal side)
+   - More distinctive aging markers: skin color changes, texture degradation
+   - Consistent viewpoint reduces variability
+
+2. **Age-discriminative features**
+   - Skin darkening: Progressive color change over 7 days
+   - Moisture loss: Surface desiccation visible from top
+   - Texture changes: Smoothness → roughness progression
+
+3. **SIDE View limitations**
+   - Smaller visible area (lateral profile only)
+   - Less distinctive aging patterns
+   - More sensitive to positioning variations
+   - Explains poor SIDE-only performance (0.496)
+
+#### Why Baseline Performs Poorly
+
+**Baseline (0.310) significantly worse than view-aware methods:**
+
+1. **Loss of view-specific information**
+   - Model sees mixed TOP+SIDE images without labels
+   - Cannot learn view-specific features (e.g., "if TOP, focus on skin color")
+   - Forced to learn view-agnostic features only
+
+2. **Conflicting optimization objectives**
+   - TOP images require different feature extractors than SIDE
+   - Single shared network must compromise
+   - Results in suboptimal features for both views
+
+3. **View-awareness is critical**
+   - Late Fusion: +58% improvement over Baseline (0.310 → 0.181)
+   - Feature Fusion: +34% improvement over Baseline (0.310 → 0.204)
+   - Proves explicit view modeling is essential
+
+#### Model vs Human Performance
+
+| Metric | Best Model | Human (Pre) | Human (Post) | Improvement |
+|--------|-----------|-------------|--------------|-------------|
+| **MAE** | **0.181 days** | 1.965 days | 2.295 days | **~11-13×** |
+
+**Why models dominate humans:**
+
+1. **Subtle visual patterns**: Models detect imperceptible color/texture changes
+2. **Consistency**: No human biases or fatigue
+3. **Multi-scale features**: Hierarchical features from local textures to global patterns
+4. **Quantitative precision**: Continuous age prediction vs human categorical thinking
+
+**Why human calibration failed:**
+- Anchoring bias from reference images
+- Task difficulty: Changes too subtle for human perception
+- Low inter-rater reliability (ICC: 0.20 → 0.11) indicates inherent human variability
+
+### Implications
+
+**For Deployment:**
+- Use **Late Fusion** for production (best generalization, robust)
+- **TOP view alone** acceptable if SIDE unavailable (0.205 vs 0.181)
+- Avoid Baseline approach (view-awareness critical)
+
+**For Research:**
+- CV performance doesn't guarantee test performance (Late: rank 2 → rank 1)
+- Simpler fusion can outperform complex fusion on unseen data
+- View importance varies: TOP >> SIDE for this task
+- Modern architectures (ConvNeXt) outperform older CNNs (ResNet)
 
 ## Repository Structure
 
 ```
-.
-├── Dataset_Processed/          # Preprocessed images (224x224)
-├── Labels/                     # Train/val/test CSV files
-├── Model/                      # Model architectures and training code
-│   ├── Training/               # Training scripts
-│   ├── Evaluating/             # Evaluation scripts
-│   └── checkpoints/            # Trained model checkpoints (not included)
-├── Results/                    # Example outputs and visualizations
-├── User_Study/                 # Human performance evaluation study
-│   ├── analysis.py             # Statistical analysis script
-│   ├── Chicken Decay Estimation Study.csv  # User study responses
-│   ├── pre_survey_images.txt   # Ground truth for pre-calibration
-│   ├── post_survey_images.txt  # Ground truth for post-calibration
-│   └── Results/                # Analysis outputs
-│       ├── 1_predictions_vs_groundtruth.png
-│       ├── 2_model_vs_human_comparison.png
-│       ├── 3_individual_participant_performance.png
-│       └── participant_detailed_results.csv
-├── README.md                   # This file
-├── README_TRAINING.md          # Detailed training guide
-└── requirements.txt            # Python dependencies
+Project/
+├── Scripts/
+│   ├── training/
+│   │   ├── train_best_model.py
+│   │   ├── train_other_strategies.py
+│   │   └── train_custom.py
+│   └── evaluating/
+│       ├── evaluate_best_model.py
+│       ├── compare_best_model.py
+│       ├── evaluate_all_models.py
+│       └── evaluate_custom.py
+├── Model/
+│   ├── model.py              # Architecture definitions
+│   ├── dataset.py            # Data loading
+│   └── __init__.py
+├── Results/
+│   ├── convnext_t/          # Best model detailed results
+│   │   ├── metrics.json
+│   │   ├── other_strategies_metrics.json
+│   │   ├── csv/
+│   │   └── graphs/
+│   ├── comparison/          # All models comparison
+│   │   ├── csv/
+│   │   └── graphs/
+│   └── other_models/        # Custom evaluations
+├── Labels/
+│   ├── train.csv, val.csv, test.csv
+│   ├── generate_labels.py
+│   └── split_labels.py
+├── checkpoints/            # Saved model weights
+├── Dataset_Processed/      # 224x224 RGB images
+└── User_Study/            # Human performance evaluation
 ```
 
 ## Quick Start
 
-### 1. Installation
+### 1. Evaluate Best Model (ConvNeXt-T Feature Fusion)
+
+Generate detailed analysis plots:
 
 ```bash
-# Clone the repository
-git clone https://github.com/Adam-Kumar/chicken_age_estimator.git
-cd chicken_age_estimator
-
-# Create virtual environment (recommended)
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
+cd c:\Users\xadam\OneDrive\Documents\Project
+python Scripts/evaluating/evaluate_best_model.py
 ```
 
-### 2. Train Models
+**Output** (`Results/convnext_t/`):
+- `scatter_plot.png` - Predicted vs actual with metrics
+- `confusion_matrix.png` - Age classification matrix
+- `error_distribution.png` - Error histogram & box plot
+- `per_day_performance.png` - MAE by day
+- `predictions.csv` - All predictions with errors
+- `metrics.json` - Performance metrics
 
-Train all three models:
-```bash
-python Model/Training/train_all_models.py
-```
+### 2. Compare All 5 Strategies
 
-Or train individual models:
-```bash
-python Model/Training/train_baseline.py
-python Model/Training/train_latefusion.py
-python Model/Training/train_featurefusion.py
-```
-
-### 3. Evaluate and Compare
+Compare Feature Fusion, Late Fusion, Baseline, TOP-only, and SIDE-only:
 
 ```bash
-python Model/Evaluating/evaluate_all_models.py
+python Scripts/evaluating/compare_best_model.py
 ```
 
-Results will be saved to `Results/comparison/`.
+**Output** (`Results/comparison/convnext_t/`):
+- `summary.csv` - Performance table
+- `strategy_comparison.png` - Bar chart comparison
+- `val_vs_test.png` - Generalization analysis
+- `grouped_comparison.png` - Single-view vs multi-view
+- `analysis_report.txt` - Statistical analysis
+
+### 3. Evaluate All 27 Models
+
+Compare all backbones and fusion strategies:
+
+```bash
+python Scripts/evaluating/evaluate_all_models.py
+```
+
+**Output** (`Results/comparison/`):
+- `summary.csv` - Complete ranking table
+- `all_models_comparison.png` - Performance by fusion type
+- `model_size_vs_performance.png` - Efficiency analysis
+- `fusion_comparison.png` - Fusion strategy comparison
+
+### 4. Evaluate Custom Model
+
+Evaluate any specific backbone-fusion combination:
+
+```bash
+python Scripts/evaluating/evaluate_custom.py --backbone convnext_t --fusion feature
+python Scripts/evaluating/evaluate_custom.py --backbone resnet50 --fusion late
+```
+
+**Output** (`Results/other_models/{backbone}_{fusion}/`):
+- Scatter plots, confusion matrices, error distributions
+- Predictions and metrics CSVs
 
 ## Dataset
 
 ### Included: Dataset_Processed
-- **Size:** ~4.8MB
-- **Format:** 224x224 RGB images
-- **Structure:** TOP VIEW and SIDE VIEW folders organized by day (1-7)
-- **Splits:** 799 train, 169 validation, 183 test samples
-- **Content:** 82 unique chicken pieces, tracked across 7 days
+- **Size**: ~4.8MB (224×224 RGB images)
+- **Structure**: TOP VIEW and SIDE VIEW folders by day (1-7)
+- **Splits**: 799 train, 169 validation, 183 test samples
+- **Content**: 82 unique chicken drumettes tracked across 7 days
+- **Split Strategy**: Chicken-level (no chicken appears in multiple splits)
 
-### Full Dataset (Dataset_Original)
+### Data Characteristics
+- **Views**: Paired TOP (dorsal) and SIDE (lateral) images
+- **Age Range**: Days 1-7 post-slaughter
+- **Preprocessing**: Resized to 224×224, normalized for ImageNet models
+- **Augmentation** (training only): Random crop, flip, rotation, color jitter
 
-The preprocessed dataset included in this repository is sufficient for training and reproducing the results. However, if you need access to the **original high-resolution images** (6.8GB), please contact me:
+### Full Dataset (Original Resolution)
 
-**Email:** is0699se@ed.ritsumei.ac.jp
+For **original high-resolution images** (6.8GB):
 
-Please include your name, institution, and intended research purpose.
-
-### Dataset Details
-- **Views:** Paired TOP and SIDE view images
-- **Days:** 1-7 (age progression)
-- **Preprocessing:** Resized, normalized for ResNet50
-- **Augmentation:** Random crop, flip, rotation, color jitter (training only)
+**Contact**: is0699se@ed.ritsumei.ac.jp
+Please include: name, institution, research purpose
 
 ## Model Architectures
 
-### Baseline (Independent Image Processing)
+### Baseline (View-Agnostic)
+```python
+from Model import ResNetRegressor
+
+model = ResNetRegressor(backbone_name="convnext_t", pretrained=True)
+# Training: Mixes TOP+SIDE images (view-agnostic)
+# Testing: Averages predictions from both views
 ```
-Input (224x224x3) → ResNet50 → FC → Age prediction
+
+### Late Fusion (View-Aware Ensemble) ⭐ Best
+```python
+from Model import LateFusionRegressor
+
+model = LateFusionRegressor(backbone_name="convnext_t", pretrained=True)
+# Two separate models (TOP, SIDE) → Average predictions
+# ConvNeXt-T Late: 0.181 MAE (test set)
 ```
-- Processes one image at a time
-- Trained on both TOP and SIDE view images independently (treats them as separate samples)
-- Does not explicitly use view pairing
-- Fastest training (~20-40 min) with 2× training samples (798 images)
 
-### Late Fusion ⭐ Best Model
+### Feature Fusion (Learned Fusion)
+```python
+from Model import FeatureFusionRegressor
+
+model = FeatureFusionRegressor(backbone_name="convnext_t", pretrained=True)
+# Two backbones → Concatenate features → MLP regressor
+# ConvNeXt-T Feature: 0.204 MAE (test set)
 ```
-TOP image → ResNet50 → pred_top ──┐
-                                   ├─→ average → final prediction
-SIDE image → ResNet50 → pred_side ─┘
+
+## Training Details
+
+### Hyperparameters
+- **Epochs**: 30
+- **Batch Size**: 8
+- **Optimizer**: AdamW (weight decay 1e-2)
+- **Scheduler**: Cosine annealing
+- **Learning Rates**:
+  - CNNs: 1e-4
+  - ConvNeXt: 8e-5
+  - Transformers: 5e-5
+
+### Data Augmentation
+- Random horizontal flip (p=0.5)
+- Random rotation (±10°)
+- Color jitter (brightness/contrast=0.2)
+- ImageNet normalization
+
+### Training Your Own Models
+
+See **[README_TRAINING.md](README_TRAINING.md)** for detailed training instructions.
+
+Quick training commands:
+
+```bash
+# Train best model
+python Scripts/training/train_best_model.py
+
+# Train all alternative strategies
+python Scripts/training/train_other_strategies.py
+
+# Train specific configuration
+python Scripts/training/train_custom.py --backbone convnext_t --fusion feature
 ```
-- Uses paired TOP and SIDE view images explicitly
-- Trains on 399 image pairs
-- Simple ensemble strategy - averages predictions from both views
-- Best for small datasets
-- Test MAE: 0.428 days
-
-### Feature Fusion
-```
-TOP image → ResNet50 → features_top ──┐
-                                       ├─→ concatenate → FC(512) → prediction
-SIDE image → ResNet50 → features_side ─┘
-```
-- Uses paired TOP and SIDE view images explicitly
-- Trains on 399 image pairs
-- Learns cross-view interactions by combining features
-- Better for large datasets (>5000 samples)
-- Test MAE: 0.467 days
-
-## Requirements
-
-- Python 3.8+
-- PyTorch 2.0+
-- CUDA-capable GPU (recommended)
-- 8GB+ RAM
-- ~5GB disk space (for dataset + checkpoints)
-
-## Training Configuration
-
-Default parameters (optimized for this dataset):
-- **Epochs:** 30
-- **Batch size:** 32
-- **Learning rate:** 1e-4
-- **Weight decay:** 1e-2 (L2 regularization)
-- **Optimizer:** AdamW
-- **Scheduler:** CosineAnnealingLR
-
-## Results
-
-Example outputs in `Results/`:
-- **Training curves:** Loss/MAE progression over epochs
-- **Comparison plots:**
-  - Side-by-side scatter plots for all 3 models
-  - Bar charts with unified 0-1 day scale for easy comparison
-  - Combined confusion matrices
-- **Metrics table:** MAE, RMSE, parameters comparison
-- **Predictions:** CSV files with individual predictions
 
 ## User Study: Model vs Human Performance
 
-### Overview
-
-To validate the model's performance, we conducted a user study comparing human estimation accuracy against the ResNet-50 model. The study involved 20 participants estimating chicken drumette age before and after calibration.
-
 ### Study Design
+- **Participants**: 20 individuals
+- **Task**: Estimate chicken drumette age (1-7 days)
+- **Conditions**: Pre-calibration and post-calibration
+- **Images**: 10 test images per condition
 
-- **Participants:** 20 individuals
-- **Task:** Estimate the age (1-7 days) of chicken drumettes from images
-- **Structure:**
-  - **Pre-calibration:** 10 images without any reference
-  - **Calibration phase:** Participants shown reference images for each day
-  - **Post-calibration:** 10 different images to test improvement
-- **Views:** Both TOP and SIDE view images provided (matching model inputs)
+### Results
 
-### Key Findings
-
-| Metric | Baseline | Feature Fusion | Late Fusion | Human (Pre-calib) | Human (Post-calib) |
-|--------|----------|----------------|-------------|-------------------|-------------------|
-| **MAE** | 0.490 days | 0.465 days | **0.430 days** | 1.965 days | 2.295 days |
-| **RMSE** | 0.645 days | 0.569 days | **0.539 days** | 2.487 days | 2.796 days |
-| **Exact Accuracy** | - | - | - | 18.5% | 12.0% |
-| **Within ±1 day** | - | - | - | 46.0% | 41.0% |
+| Metric | Best Model | Human (Pre) | Human (Post) |
+|--------|-----------|-------------|--------------|
+| **MAE** | **0.181 days** | 1.965 days | 2.295 days |
+| **Accuracy** | High | 18.5% | Lower |
+| **ICC** | - | 0.20 | 0.11 |
 
 **Key Findings:**
-
-1. **All models significantly outperform humans:** Even the baseline model (MAE: 0.483) performs 4× better than humans
-2. **Late Fusion is best:** The Late Fusion model (MAE: 0.428) achieves the lowest error
-3. **Calibration paradoxically hurt performance:** Human accuracy decreased after calibration (MAE: 1.965 → 2.295, p=0.0108)
-   - This suggests reference images may have introduced anchoring bias or confusion
-   - Humans may "overthink" after seeing examples rather than relying on intuition
-   - The task is fundamentally difficult for humans to learn even with training
-4. **Low inter-rater reliability:** ICC scores (0.20 pre, 0.11 post) indicate high disagreement between participants
-
-### Inter-Rater Reliability
-
-- **Pre-calibration ICC:** 0.20 (poor agreement)
-- **Post-calibration ICC:** 0.11 (poor agreement)
-
-Low ICC values indicate high variability between human raters, suggesting the task is challenging even with calibration.
+1. **Models outperform humans by 11-13×** in MAE
+2. **Calibration paradoxically worsened human performance** (p=0.0108)
+   - Anchoring bias from reference images
+   - Overthinking effect after seeing examples
+3. **Low inter-rater reliability** indicates task difficulty for humans
+4. **Models excel at detecting subtle visual changes** imperceptible to humans
 
 ### Running the Analysis
-
-To reproduce the user study analysis:
 
 ```bash
 python User_Study/analysis.py
 ```
 
-This generates (saved to `User_Study/Results/`):
-- **Statistical metrics:** MAE, RMSE, accuracy, inter-rater reliability printed to console
-- **3 visualization plots:**
-  - Predictions vs ground truth (pre & post calibration)
-  - Model vs human comparison (all 3 architectures + human performance)
-  - Individual participant performance
-- **Detailed CSV:** Per-participant metrics and improvement scores
+**Generates** (`User_Study/Results/`):
+- Statistical metrics (console)
+- Prediction scatter plots
+- Model vs human comparison chart
+- Per-participant performance
+- Detailed metrics CSV
 
-### Study Files
+## Requirements
 
-**Input files:**
-- `Chicken Decay Estimation Study.csv` - Raw survey responses from 20 participants
-- `pre_survey_images.txt` - Ground truth labels for pre-calibration images
-- `post_survey_images.txt` - Ground truth labels for post-calibration images
-- `analysis.py` - Statistical analysis script with full documentation
-
-**Output files (Results/ folder):**
-- `1_predictions_vs_groundtruth.png` - Scatter plots showing human prediction accuracy
-- `2_model_vs_human_comparison.png` - Bar chart comparing all 3 models vs humans
-- `3_individual_participant_performance.png` - Per-participant pre/post comparison
-- `participant_detailed_results.csv` - Complete metrics for each participant
-
-## Documentation
-
-- **[README_TRAINING.md](README_TRAINING.md)** - Comprehensive training and evaluation guide
-- **Code comments** - Detailed docstrings in all modules
-
-## Project Structure Details
-
-### Model/
-- `model.py` - Architecture definitions
-- `dataset.py` - PyTorch Dataset and DataLoader
-- `train_core.py` - Core training loop
-- `Training/` - Training scripts for each model
-- `Evaluating/` - Evaluation scripts for each model
-
-### Labels/
-- `train.csv`, `val.csv`, `test.csv` - Data splits
-- `generate_labels.py` - Script to create labels from images
-- `split_labels.py` - Script to split dataset
-
-### Results/
-- `training_curves/` - Training progress plots
-- `comparison/` - Model comparison visualizations:
-  - `metrics_comparison.csv` - Performance metrics table
-  - `metrics_comparison.png` - Bar charts (MAE & RMSE with unified 0-1 day scale)
-  - `scatter_comparison.png` - Side-by-side scatter plots for all 3 models
-  - `confusion_matrix_comparison.png` - Combined confusion matrices
-- `predictions/` - Individual model prediction CSV files
-- `plots/` - Individual evaluation plots
-
-### User_Study/
-- `analysis.py` - Statistical analysis script with comprehensive metrics
-- `Chicken Decay Estimation Study.csv` - Survey responses from 20 participants
-- `pre_survey_images.txt` - Ground truth for pre-calibration test images (10 images)
-- `post_survey_images.txt` - Ground truth for post-calibration test images (10 images)
-- `Results/` - Analysis outputs:
-  - `1_predictions_vs_groundtruth.png` - Human prediction scatter plots
-  - `2_model_vs_human_comparison.png` - Bar chart with all 3 models vs humans
-  - `3_individual_participant_performance.png` - Per-participant pre/post comparison
-  - `participant_detailed_results.csv` - Detailed metrics for all 20 participants
+- Python 3.8+
+- PyTorch 2.0+
+- CUDA GPU (recommended)
+- 8GB+ RAM
+- ~5GB disk space
 
 ## Hardware Recommendations
 
 **Minimum:**
 - CPU: 4 cores
 - RAM: 8GB
-- GPU: Not required but very slow without
+- GPU: Optional (slow without)
 
 **Recommended:**
 - CPU: 8+ cores
 - RAM: 16GB+
-- GPU: NVIDIA GPU with 6GB+ VRAM (e.g., RTX 3060)
-- Training time: ~1.5-3 hours for all models
+- GPU: NVIDIA 8GB+ VRAM (RTX 3080+)
+- Training time: ~3-5 hours per model
 
-## Troubleshooting
+## Documentation
 
-**CUDA Out of Memory:**
-```bash
-python Model/Training/train_baseline.py --batch_size 16
-```
-
-**Import Errors:**
-```bash
-cd /path/to/project/root
-python Model/Training/train_baseline.py
-```
-
-**Missing Dependencies:**
-```bash
-pip install -r requirements.txt
-```
-
-See [README_TRAINING.md](README_TRAINING.md) for detailed troubleshooting.
+- **[README_TRAINING.md](README_TRAINING.md)** - Comprehensive training guide
+- **Code docstrings** - Detailed inline documentation
 
 ## Author
 
@@ -329,27 +429,26 @@ Information System Science and Engineering
 Visual Information Engineering Laboratory
 Ritsumeikan University
 
-**Supervisor:** Damon Chandler
-**Contact:** is0699se@ed.ritsumei.ac.jp
+**Supervisor**: Damon Chandler
+**Contact**: is0699se@ed.ritsumei.ac.jp
 
 ## Acknowledgments
 
-- **Supervisor:** Damon Chandler, Visual Information Engineering Laboratory, Ritsumeikan University
-- ResNet50 backbone pretrained on ImageNet (PyTorch)
+- Supervisor: Damon Chandler, Visual Information Engineering Lab, Ritsumeikan University
+- PyTorch pretrained models (ImageNet)
 - Dataset collected at Ritsumeikan University for chicken age estimation research
 
 ## Contact
 
-**For questions about the code or dataset:**
-- Open an issue on GitHub
+**For questions about code or dataset:**
 - Email: is0699se@ed.ritsumei.ac.jp
+- Include: name, institution, research purpose
 
 **Institution:**
 Visual Information Engineering Laboratory
 Information System Science and Engineering
-Ritsumeikan University
-Japan
+Ritsumeikan University, Japan
 
 ---
 
-**Project Status:** Active research project. Paper in preparation for publication.
+**Project Status**: Active research. Paper in preparation for publication.

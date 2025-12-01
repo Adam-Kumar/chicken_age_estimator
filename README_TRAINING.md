@@ -1,65 +1,104 @@
 # Training & Evaluation Guide
 
-Complete guide for training and evaluating chicken age regression models.
+Complete guide for training and evaluating all 27 model configurations in the chicken age estimation project.
 
 > **See [README.md](README.md) for project overview, installation, and model architectures.**
 
 ---
 
 ## Table of Contents
-- [Quick Start](#quick-start)
+- [Quick Reference](#quick-reference)
 - [Training Scripts](#training-scripts)
 - [Evaluation Scripts](#evaluation-scripts)
-- [Training Configuration](#training-configuration)
-- [Understanding Training Output](#understanding-training-output)
-- [Output Files](#output-files)
+- [Training Details](#training-details)
+- [Output Structure](#output-structure)
+- [Progress Tracking](#progress-tracking)
+- [Model Configurations](#model-configurations)
 - [Troubleshooting](#troubleshooting)
-- [Advanced Usage](#advanced-usage)
+- [Tips for Best Results](#tips-for-best-results)
 
 ---
 
-## Quick Start
+## Quick Reference
 
-### Train All Models
-```bash
-python Model/Training/train_all_models.py
-```
-**Time:** 1.5-3 hours (GPU) | **Outputs:** Model checkpoints + training curves
+### Training Scripts (Scripts/training/)
 
-### Evaluate All Models
-```bash
-python Model/Evaluating/evaluate_all_models.py
-```
-**Outputs:** Comparison table, scatter plots, predictions
+| Script | Purpose | Output | Time Estimate |
+|--------|---------|--------|---------------|
+| **train_all_models.py** | Train all 27 models (9 baseline + 18 fusion) | Results/baseline_cv_results.json<br>Results/comparison/csv/progress.json | 40-70 hours |
+| **train_best_model.py** | Train ConvNeXt-T Feature Fusion only | checkpoints/convnext_t_feature_best.pth<br>Results/convnext_t/graphs/training_curves.png | 3-5 hours |
+| **train_custom.py** | Train specific backbone + fusion | checkpoints/{backbone}_{fusion}_best.pth<br>Results/custom_training/graphs/ | 1-3 hours |
+| **train_single_view.py** | Train ConvNeXt-T with TOP/SIDE separately | Results/single_view_results.json | 6-10 hours |
+
+### Evaluation Scripts (Scripts/evaluating/)
+
+| Script | Purpose | Output |
+|--------|---------|--------|
+| **evaluate_all_models.py** | Compare all 27 configurations | Results/comparison/csv/summary.csv<br>Results/comparison/graphs/ |
+| **evaluate_best_model.py** | Detailed ConvNeXt-T analysis | Results/convnext_t/csv/predictions.csv<br>Results/convnext_t/graphs/ |
+| **evaluate_custom.py** | Evaluate specific model with detailed analysis | Results/other_models/{backbone}_{fusion}/csv/<br>Results/other_models/{backbone}_{fusion}/graphs/ |
 
 ---
 
 ## Training Scripts
 
-### Train All Models (Recommended)
+### Option 1: Quick Start (Recommended)
+
+Evaluate existing trained models:
 
 ```bash
-python Model/Training/train_all_models.py
+# Compare all 27 configurations
+python Scripts/evaluating/evaluate_all_models.py
+
+# Detailed best model analysis
+python Scripts/evaluating/evaluate_best_model.py
+
+# Evaluate specific model with full analysis
+python Scripts/evaluating/evaluate_custom.py --backbone convnext_t --fusion feature
+python Scripts/evaluating/evaluate_custom.py --backbone resnet50 --fusion late
 ```
 
-Trains baseline, late fusion, and feature fusion sequentially.
+### Option 2: Train Specific Model
 
-**Outputs:**
-- `Model/checkpoints/best_{model_type}.pth` - Model weights
-- `Results/training_curves/train_val_mae_{model_type}.png` - Training progress
-
-### Train Individual Models
+Train a specific configuration:
 
 ```bash
-# Baseline (~20-40 min)
-python Model/Training/train_baseline.py
+# Train ConvNeXt-T with Feature Fusion
+python Scripts/training/train_custom.py --backbone convnext_t --fusion feature
 
-# Late Fusion (~30-60 min)
-python Model/Training/train_latefusion.py
+# Train ResNet-50 with Late Fusion
+python Scripts/training/train_custom.py --backbone resnet50 --fusion late --epochs 50
 
-# Feature Fusion (~30-60 min)
-python Model/Training/train_featurefusion.py
+# Train EfficientNet-B0 baseline (single-view)
+python Scripts/training/train_custom.py --backbone efficientnet_b0 --fusion baseline
 ```
+
+**Available options:**
+- Backbones: `efficientnet_b0`, `resnet18`, `resnet50`, `resnet101`, `vit_b_16`, `swin_t`, `swin_b`, `convnext_t`, `convnext_b`
+- Fusion: `baseline` (view-agnostic), `late` (view-aware ensemble), `feature` (learned fusion)
+- Additional args: `--folds`, `--epochs`, `--batch_size`
+
+### Option 3: Train Best Model Only
+
+Train the champion model from scratch:
+
+```bash
+python Scripts/training/train_best_model.py
+```
+
+This trains ConvNeXt-T Feature Fusion with 3-fold CV and saves:
+- Checkpoint: `checkpoints/convnext_t_feature_best.pth`
+- Training curves: `Results/convnext_t/graphs/training_curves.png`
+
+### Option 4: Train Everything (Long Running)
+
+Train all 27 models from scratch:
+
+```bash
+python Scripts/training/train_all_models.py
+```
+
+**Warning:** This takes 40-70 hours with GPU. The script is resumable - if interrupted, it will continue from the last completed fold.
 
 ---
 
@@ -68,232 +107,234 @@ python Model/Training/train_featurefusion.py
 ### Compare All Models
 
 ```bash
-python Model/Evaluating/evaluate_all_models.py
+python Scripts/evaluating/evaluate_all_models.py
 ```
 
 Generates comprehensive comparison:
-- `Results/comparison/metrics_comparison.csv` - Performance table
-- `Results/comparison/metrics_comparison.png` - Bar charts (MAE/RMSE)
-- `Results/comparison/scatter_comparison.png` - Scatter plots (all models)
-- `Results/comparison/predictions_{model}.csv` - Individual predictions
+- `Results/comparison/csv/summary.csv` - All 27 models ranked
+- `Results/comparison/graphs/all_models_comparison.png` - Performance by fusion type
+- `Results/comparison/graphs/model_size_vs_performance.png` - Efficiency analysis
+- `Results/comparison/graphs/fusion_comparison.png` - Fusion strategy comparison
 
-### Evaluate Individual Models
+### Evaluate Best Model
 
 ```bash
-# Baseline
-python Model/Evaluating/evaluate_baseline.py
-
-# Late Fusion
-python Model/Evaluating/evaluate_latefusion.py
-
-# Feature Fusion
-python Model/Evaluating/evaluate_featurefusion.py
+python Scripts/evaluating/evaluate_best_model.py
 ```
 
-**Options:**
+Detailed ConvNeXt-T Feature Fusion analysis:
+- `Results/convnext_t/csv/predictions.csv` - All predictions with errors
+- `Results/convnext_t/graphs/scatter_plot.png` - Predicted vs actual with metrics
+- `Results/convnext_t/graphs/confusion_matrix.png` - Age classification matrix
+- `Results/convnext_t/graphs/error_distribution.png` - Histogram and box plot
+- `Results/convnext_t/graphs/per_day_performance.png` - MAE breakdown by day
+
+### Evaluate Specific Model
+
 ```bash
-# Evaluate on validation set
-python Model/Evaluating/evaluate_baseline.py --split val
-
-# Evaluate on training set
-python Model/Evaluating/evaluate_baseline.py --split train
-
-# Custom batch size
-python Model/Evaluating/evaluate_baseline.py --batch_size 32
+python Scripts/evaluating/evaluate_custom.py --backbone convnext_t --fusion feature
+python Scripts/evaluating/evaluate_custom.py --backbone resnet50 --fusion late
+python Scripts/evaluating/evaluate_custom.py --backbone efficientnet_b0 --fusion baseline
 ```
+
+**Optional arguments:**
+- `--backbone` (required): Model backbone (see list above)
+- `--fusion` (required): Fusion type (baseline, late, feature)
+- `--checkpoint`: Path to custom checkpoint file
+
+**Output** (in `Results/other_models/{backbone}_{fusion}/`):
+- `csv/predictions.csv` - Per-sample predictions with errors
+- `csv/metrics.csv` - MAE, RMSE, R², correlation
+- `graphs/scatter_plot.png` - Predicted vs actual
+- `graphs/confusion_matrix.png` - Age classification
+- `graphs/error_distribution.png` - Error histogram and box plot
+- `graphs/per_day_performance.png` - MAE by age group
 
 ---
 
-## Training Configuration
+## Training Details
 
-### Default Parameters
+### Cross-Validation
+- **3-fold CV** at chicken level (no data leakage)
+- Each chicken appears in only one fold
+- 82 unique chickens split across folds
 
-Optimized for this dataset (799 train, 169 val, 183 test samples):
+### Hyperparameters
+- **Epochs:** 30 (verified convergence)
+- **Batch size:** 8 (memory efficient)
+- **Optimizer:** AdamW with weight decay 1e-2
+- **Scheduler:** Cosine annealing
+- **Learning rates (auto-selected):**
+  - CNNs (ResNet, EfficientNet): 1e-4
+  - ConvNeXt: 8e-5
+  - Transformers (ViT, Swin): 5e-5
 
-```python
-epochs = 30              # Training epochs
-batch_size = 32          # Images per batch
-lr = 1e-4                # Learning rate
-weight_decay = 1e-2      # L2 regularization
-seed = 42                # Random seed
-```
+### Data Augmentation (Training Only)
+- Random horizontal flip (p=0.5)
+- Random rotation (±10°)
+- Color jitter (brightness=0.2, contrast=0.2)
+- Gaussian blur (p=0.2)
+- ImageNet normalization
 
-### Optimizer & Scheduler
+### Understanding Training Output
 
-- **Optimizer:** AdamW (Adam with weight decay)
-- **Scheduler:** CosineAnnealingLR (learning rate decay)
-- **Loss:** L1Loss (Mean Absolute Error)
-
-### Data Augmentation
-
-**Training:**
-- Random resized crop (90-100%)
-- Random horizontal flip
-- Random rotation (±10°, 30% probability)
-- Color jitter (brightness, contrast, saturation, hue)
-- Gaussian blur (20% probability)
-
-**Validation/Test:**
-- Resize to 224x224
-- Center crop
-- Normalization (ImageNet mean/std)
-
-### Customizing Parameters
-
-**Method 1: Edit train_all_models.py**
-
-Edit the `CONFIG` dictionary in `Model/Training/train_all_models.py`:
-
-```python
-CONFIG = {
-    "epochs": 50,        # Train longer
-    "batch_size": 16,    # Reduce for GPU memory
-    "lr": 5e-5,          # Lower learning rate
-    "weight_decay": 1e-2,
-    "seed": 42,
-}
-```
-
-**Method 2: Command-line arguments**
-
-```bash
-python Model/Training/train_baseline.py --epochs 50 --batch_size 16 --lr 5e-5
-```
-
-**Available arguments:**
-- `--epochs` - Number of training epochs
-- `--batch_size` - Images per batch
-- `--lr` - Learning rate
-- `--weight_decay` - L2 regularization strength
-- `--seed` - Random seed for reproducibility
-- `--freeze_backbone` - Only train final layer (transfer learning)
-
----
-
-## Understanding Training Output
-
-### Example Training Log
-
+Example training log:
 ```
 Epoch 18/30 | train loss 0.3245 MAE 0.324 | val loss 0.4302 MAE 0.430
-  -> New best MAE. Checkpoint saved to Model/checkpoints/best_late_fusion.pth
+  -> New best MAE. Checkpoint saved to checkpoints/convnext_t_feature_best.pth
 ```
 
-### What to Look For
+**What to look for:**
 
-**✅ Good Training:**
+✅ **Good Training:**
 - Train and val MAE decrease together
 - Val MAE improves periodically
 - Small gap between train/val MAE (< 0.2 days)
 
-**⚠️ Overfitting:**
+⚠️ **Overfitting:**
 - Train MAE much lower than val MAE (gap > 0.5 days)
 - Val MAE stops improving while train continues decreasing
-- Model saves checkpoint early and never improves
 
-**⚠️ Underfitting:**
+⚠️ **Underfitting:**
 - Both train and val MAE remain high (> 1.5 days)
 - Little improvement over epochs
-- Model might need more capacity or longer training
-
-### Interpreting MAE Values
-
-| MAE | Interpretation |
-|-----|----------------|
-| < 0.5 days | Excellent - predictions very accurate |
-| 0.5-1.0 days | Good - acceptable for most applications |
-| 1.0-1.5 days | Fair - room for improvement |
-| > 1.5 days | Poor - model needs debugging |
 
 ---
 
-## Output Files
+## Output Structure
 
 ### Training Outputs
 
-**Checkpoints** (`Model/checkpoints/`):
 ```
-best_baseline.pth          # Baseline model weights
-best_late_fusion.pth       # Late fusion weights
-best_feature_fusion.pth    # Feature fusion weights
-```
+Results/
+├── comparison/
+│   └── csv/
+│       └── progress.json              # Late/Feature fusion CV results
+├── baseline_cv_results.json           # Baseline models CV results
+├── single_view_results.json           # TOP/SIDE only analysis
+└── convnext_t/
+    └── graphs/
+        └── training_curves.png        # Best model training curves
 
-Each checkpoint contains:
-- `model_state` - Model weights
-- `model_type` - Architecture name
-- `epoch` - Best epoch number
-- `val_mae` - Best validation MAE
-
-**Training Curves** (`Results/training_curves/`):
+checkpoints/
+├── convnext_t_feature_best.pth        # Best model weights
+└── {backbone}_{fusion}_best.pth       # Custom model weights
 ```
-train_val_mae_baseline.png
-train_val_mae_late_fusion.png
-train_val_mae_feature_fusion.png
-```
-
-Shows MAE progression over epochs for train and validation sets.
 
 ### Evaluation Outputs
 
-**Comparison Results** (`Results/comparison/`):
 ```
-metrics_comparison.csv     # Performance table
-metrics_comparison.png     # Bar charts (MAE/RMSE)
-scatter_comparison.png     # Scatter plots (all models)
-predictions_*.csv          # Predictions for each model
+Results/
+├── comparison/
+│   ├── csv/
+│   │   └── summary.csv                # All 27 models ranked
+│   └── graphs/
+│       ├── all_models_comparison.png
+│       ├── model_size_vs_performance.png
+│       └── fusion_comparison.png
+├── convnext_t/
+│   ├── csv/
+│   │   └── predictions.csv            # Test set predictions
+│   └── graphs/
+│       ├── scatter_plot.png
+│       ├── confusion_matrix.png
+│       ├── error_distribution.png
+│       └── per_day_performance.png
+└── other_models/
+    └── {backbone}_{fusion}/
+        ├── csv/
+        │   ├── predictions.csv
+        │   └── metrics.csv
+        └── graphs/
+            ├── scatter_plot.png
+            ├── confusion_matrix.png
+            ├── error_distribution.png
+            └── per_day_performance.png
 ```
 
-**Individual Plots** (`Results/plots/`):
+---
+
+## Progress Tracking
+
+All training scripts support **resumable training**:
+- Progress saved after each fold
+- Skips already completed experiments
+- Can safely interrupt and restart
+
+To check progress:
+```bash
+# Check baseline progress
+cat Results/baseline_cv_results.json
+
+# Check fusion progress
+cat Results/comparison/csv/progress.json
 ```
-eval_baseline_test_scatter.png
-eval_latefusion_test_scatter.png
-eval_featurefusion_test_scatter.png
-```
+
+---
+
+## Model Configurations
+
+### 27 Total Configurations
+
+**9 Backbones × 3 Fusion Types = 27 Models**
+
+| Fusion Type | Description | Models |
+|-------------|-------------|--------|
+| **Baseline** | View-agnostic (TOP+SIDE mixed training) | 9 models |
+| **Late Fusion** | View-aware ensemble (separate models) | 9 models |
+| **Feature Fusion** | Learned fusion (concatenate features) | 9 models |
+
+### Performance Summary
+
+| Rank | Backbone | Fusion | Mean MAE | Std MAE | Params (M) |
+|------|----------|--------|----------|---------|------------|
+| 1 | ConvNeXt-T | Feature | **0.172** | 0.016 | 28.59 |
+| 2 | ConvNeXt-T | Late | 0.197 | 0.006 | 55.64 |
+| 3 | ConvNeXt-B | Late | 0.226 | 0.008 | 176.04 |
+| 4 | ConvNeXt-B | Feature | 0.270 | 0.058 | 89.05 |
+| 5 | Swin-T | Late | 0.280 | 0.004 | 55.04 |
+
+**Key Findings:**
+- ConvNeXt-T Feature Fusion achieves best performance
+- Feature Fusion generally outperforms Late Fusion
+- ConvNeXt architectures dominate top positions
+- Model size doesn't correlate directly with performance
 
 ---
 
 ## Troubleshooting
 
-### Missing Checkpoint Error
-
-```
-[ERROR] Checkpoint not found: Model/checkpoints/best_baseline.pth
-```
-
-**Solution:** Train the model first
-```bash
-python Model/Training/train_baseline.py
-```
-
 ### CUDA Out of Memory
 
-```
-RuntimeError: CUDA out of memory
-```
-
-**Solutions:**
-
-1. Reduce batch size:
+Reduce batch size:
 ```bash
-python Model/Training/train_baseline.py --batch_size 16
-```
-
-2. Use CPU (much slower):
-```bash
-# PyTorch will automatically use CPU if CUDA unavailable
-python Model/Training/train_baseline.py
+python Scripts/training/train_custom.py --backbone convnext_t --fusion feature --batch_size 4
 ```
 
 ### Import Errors
 
-```
-ModuleNotFoundError: No module named 'Model'
+Always run from project root:
+```bash
+cd c:\Users\xadam\OneDrive\Documents\Project
+python Scripts/training/train_custom.py --backbone convnext_t --fusion feature
 ```
 
-**Solution:** Always run from project root
+### Resume Training
+
+Training is automatic - just re-run the same command:
 ```bash
-cd /path/to/Project
-python Model/Training/train_baseline.py
+python Scripts/training/train_all_models.py  # Will skip completed experiments
+```
+
+### Missing Checkpoint Error
+
+```
+[ERROR] Checkpoint not found: checkpoints/convnext_t_feature_best.pth
+```
+
+**Solution:** Train the model first
+```bash
+python Scripts/training/train_best_model.py
 ```
 
 ### Missing Images Error
@@ -314,83 +355,65 @@ python split_labels.py
 
 ---
 
-## Advanced Usage
-
-### Freeze Backbone (Transfer Learning)
-
-Only train the final layer (faster, prevents overfitting):
-
-```bash
-python Model/Training/train_baseline.py --freeze_backbone
-```
-
-### Evaluate on Different Splits
-
-```bash
-# Validation set
-python Model/Evaluating/evaluate_baseline.py --split val
-
-# Training set (check for overfitting)
-python Model/Evaluating/evaluate_baseline.py --split train
-```
-
-### Re-train a Model
-
-Simply run the training script again:
-
-```bash
-python Model/Training/train_baseline.py --epochs 50
-```
-
----
-
-## Expected Performance
-
-Based on our dataset (799 train, 169 val, 183 test):
-
-| Model | Test MAE | Test RMSE | Best Epoch | Time |
-|-------|----------|-----------|------------|------|
-| **Late Fusion** ⭐ | **0.430** | **0.539** | 18 | ~40-60 min |
-| Feature Fusion | 0.465 | 0.569 | 17 | ~40-60 min |
-| Baseline | 0.490 | 0.645 | 24 | ~20-40 min |
-
-**Why Late Fusion Wins:**
-- Small dataset (< 1000 samples)
-- Acts like ensemble (2 models)
-- Simple averaging = better generalization
-
----
-
 ## Tips for Best Results
 
-1. ✅ **Train all 3 models** - Compare on your data
-2. ✅ **Monitor training curves** - Detect overfitting early
-3. ✅ **Use late fusion for small datasets** - Better generalization
-4. ✅ **Check train/val gap** - If > 0.5 days, increase regularization
-5. ✅ **Save results before retraining** - Copy checkpoints
-6. ✅ **Use GPU if available** - 10-20x faster than CPU
+1. ✅ **Start with evaluation** - Use existing CV results before training
+2. ✅ **Train best model only** - Use `train_best_model.py` for quick results
+3. ✅ **Monitor training curves** - Detect overfitting early
+4. ✅ **Use GPU if available** - 40-100x faster than CPU
+5. ✅ **Check progress regularly** - View JSON files to track completed folds
+6. ✅ **Save results before retraining** - Copy checkpoints to backup
 
 ---
 
 ## Complete Workflow
 
 ```bash
-# 1. Train all models (1.5-3 hours)
-python Model/Training/train_all_models.py
+# 1. Evaluate existing models (< 5 min)
+python Scripts/evaluating/evaluate_all_models.py
 
-# 2. Evaluate and compare (< 5 min)
-python Model/Evaluating/evaluate_all_models.py
+# 2. Analyze results
+# - Check: Results/comparison/csv/summary.csv
+# - View: Results/comparison/graphs/
 
-# 3. Analyze results
-# - Check: Results/comparison/metrics_comparison.csv
-# - View: Results/comparison/scatter_comparison.png
+# 3. Train best model if needed (3-5 hours)
+python Scripts/training/train_best_model.py
 
-# 4. Select best model (likely late fusion)
+# 4. Detailed evaluation (< 5 min)
+python Scripts/evaluating/evaluate_best_model.py
+
+# 5. Compare specific models
+python Scripts/evaluating/evaluate_custom.py --backbone resnet50 --fusion late
 ```
 
 ---
 
-**You're ready to train and evaluate chicken age regression models!** 🚀
+## Expected Performance
+
+Based on comprehensive 3-fold CV testing (82 chickens, 1151 total samples):
+
+| Model | Test MAE | Test RMSE | Parameters |
+|-------|----------|-----------|------------|
+| **ConvNeXt-T Feature** ⭐ | **0.172 ± 0.016** | **0.220** | 28.59M |
+| ConvNeXt-T Late | 0.197 ± 0.006 | 0.248 | 55.64M |
+| ConvNeXt-B Late | 0.226 ± 0.008 | 0.285 | 176.04M |
+
+**All models significantly outperform humans** (~11-13× lower MAE than human study)
+
+---
+
+## Notes
+
+- All scripts use the same random seed (42) for reproducibility
+- GPU is highly recommended (40-100x faster than CPU)
+- Results are saved after each fold to prevent data loss
+- Training curves help diagnose convergence issues
+- Use `evaluate_all_models.py` after training to compare results
+- The `checkpoints/` folder stores trained model weights
+
+---
+
+**You're ready to train and evaluate chicken age estimation models!** 🚀
 
 For general info, see [README.md](README.md) | For issues, open a GitHub issue
 
@@ -401,5 +424,3 @@ For general info, see [README.md](README.md) | For issues, open a GitHub issue
 **Author:** Adam Kumar (is0699se@ed.ritsumei.ac.jp)
 **Institution:** Visual Information Engineering Laboratory, Ritsumeikan University
 **Supervisor:** Damon Chandler
-
-For general info, see [README.md](README.md) | For issues, open a GitHub issue

@@ -1,0 +1,87 @@
+================================================================================
+STATISTICAL ANALYSIS: Model Size vs Fusion Strategy Effectiveness
+================================================================================
+
+1. CORRELATION ANALYSIS: Model Size vs Performance
+--------------------------------------------------------------------------------
+   Spearman correlation coefficient measures monotonic relationship.
+   Negative correlation = larger models have lower MAE (better performance)
+
+   Baseline     Fusion:  rho = -0.4500  (p = 0.2242) ns
+   Late         Fusion:  rho = -0.6500  (p = 0.0581) ns
+   Feature      Fusion:  rho = -0.3833  (p = 0.3085) ns
+
+   Interpretation:
+   - More negative rho = stronger benefit from increased model size
+   - *** p<0.001, ** p<0.01, * p<0.05, ns = not significant
+
+
+2. FUSION BENEFIT ANALYSIS: Improvement Over Baseline
+--------------------------------------------------------------------------------
+   Calculates: (Baseline MAE - Fusion MAE) / Baseline MAE
+   Positive = Fusion is better, Negative = Baseline is better
+
+   Improvement by Model Size (using baseline params as reference):
+
+   efficientnet_b0 (  4.0M params):
+      Late     Fusion: -16.27%
+      Feature  Fusion:  -0.52%
+   resnet18        ( 11.2M params):
+      Late     Fusion:  -4.11%
+      Feature  Fusion: + 18.64%
+   resnet50        ( 23.5M params):
+      Late     Fusion: +  2.23%
+      Feature  Fusion:  -4.74%
+   resnet101       ( 42.5M params):
+      Late     Fusion: + 11.34%
+      Feature  Fusion: + 10.60%
+   vit_b_16        ( 86.6M params):
+      Late     Fusion:  -4.85%
+      Feature  Fusion: -29.09%
+   swin_t          ( 27.5M params):
+      Late     Fusion: + 14.46%
+      Feature  Fusion: +  4.98%
+   swin_b          ( 87.3M params):
+      Late     Fusion: +  6.44%
+      Feature  Fusion: + 13.25%
+   convnext_t      ( 27.8M params):
+      Late     Fusion: + 22.93%
+      Feature  Fusion: + 32.74%
+   convnext_b      ( 88.0M params):
+      Late     Fusion: + 23.43%
+      Feature  Fusion: +  8.56%
+
+
+   Correlation: Model Size vs Fusion Benefit
+   ----------------------------------------------------------------------------
+   Late     Fusion:  rho = +0.5500  (p = 0.1250) ns
+   Feature  Fusion:  rho = +0.0833  (p = 0.8312) ns
+
+   Interpretation:
+   - Positive rho = larger models benefit MORE from fusion
+   - Negative rho = smaller models benefit MORE from fusion
+
+
+3. CAPACITY THRESHOLD ANALYSIS
+--------------------------------------------------------------------------------
+   Identifies approximate model size where fusion becomes beneficial
+
+   Late Fusion:
+      Fusion wins at:     >=23.5M params  (models: resnet50, swin_t, convnext_t, resnet101, swin_b, convnext_b)
+      Baseline wins at:   <=86.6M params  (models: efficientnet_b0, resnet18, vit_b_16)
+
+   Feature Fusion:
+      Fusion wins at:     >=11.2M params  (models: resnet18, swin_t, convnext_t, resnet101, swin_b, convnext_b)
+      Baseline wins at:   <=86.6M params  (models: efficientnet_b0, resnet50, vit_b_16)
+
+
+
+4. KEY FINDINGS
+================================================================================
+   - Feature Fusion shows WEAKER correlation with model size than Baseline
+     (|rho_feature| = 0.3833 < |rho_baseline| = 0.4500)
+
+   ~ No significant relationship between model size and fusion benefit
+     (rho = +0.0833, p = 0.8312)
+
+================================================================================
