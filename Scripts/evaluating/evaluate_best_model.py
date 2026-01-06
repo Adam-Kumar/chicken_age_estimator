@@ -1,8 +1,8 @@
 """evaluate_best_model.py
-Detailed evaluation of ConvNeXt-T Feature Fusion (best model).
+Detailed evaluation of ConvNeXt-B Feature Fusion (best model).
 
-Uses the model trained on 70:15:15 split (train_best_model.py).
-Evaluates on the held-out test set (15% of chickens).
+Uses the model trained with 3-fold CV (train_best_model.py).
+Generates comprehensive analysis plots and metrics.
 
 Generates comprehensive analysis plots:
 - Scatter plot (predicted vs actual)
@@ -12,8 +12,8 @@ Generates comprehensive analysis plots:
 - Training curves
 - Predictions CSV
 
-Input: checkpoints/convnext_t_feature_holdout.pth
-Output: Results/convnext_t/
+Input: checkpoints/convnext_b_feature_fold*.pth (3-fold CV checkpoints)
+Output: Results/best_model/
 """
 
 import sys
@@ -22,6 +22,7 @@ from pathlib import Path
 project_root = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(project_root))
 
+import json
 import torch
 import torch.nn as nn
 import pandas as pd
@@ -34,19 +35,64 @@ from scipy import stats
 from Model.model import FeatureFusionRegressor
 from Model.dataset import ChickenAgePairedDataset, get_default_transforms
 from torch.utils.data import DataLoader
+import torchvision.transforms as T
+from torchvision.transforms import InterpolationMode
 
 
-def load_best_model(device):
-    """Load the best trained ConvNeXt-T Feature Fusion model."""
-    model = FeatureFusionRegressor(backbone_name="convnext_t", pretrained=True).to(device)
+# Test-Time Augmentation (TTA)
+USE_TTA = True  # Set to True to enable TTA (2-5% improvement)
+TTA_TRANSFORMS = [
+    lambda x: x,  # Original
+    T.RandomHorizontalFlip(p=1.0),
+    T.RandomVerticalFlip(p=1.0),
+    lambda x: T.functional.rotate(x, 90, interpolation=InterpolationMode.BILINEAR),
+    lambda x: T.functional.rotate(x, -90, interpolation=InterpolationMode.BILINEAR),
+]
 
-    # Try to load checkpoint (trained on 70:15:15 split)
-    checkpoint_path = project_root / "checkpoints" / "convnext_t_feature_holdout.pth"
+
+def predict_with_tta(model, x_top, x_side, device, transforms=TTA_TRANSFORMS):
+    """Apply Test-Time Augmentation for robust predictions.
+
+    Args:
+        model: Trained model
+        x_top: TOP view image tensor
+        x_side: SIDE view image tensor
+        device: torch device
+        transforms: List of augmentation transforms
+
+    Returns:
+        Averaged prediction from multiple augmented views
+    """
+    model.eval()
+    predictions = []
+
+    with torch.no_grad():
+        for transform in transforms:
+            aug_top = transform(x_top)
+            aug_side = transform(x_side)
+            pred = model(aug_top.to(device), aug_side.to(device))
+            predictions.append(pred)
+
+    # Average all predictions
+    return torch.stack(predictions).mean(dim=0)
+
+
+def load_best_model(device, fold=0):
+    """Load the best trained ConvNeXt-B Feature Fusion model from 3-fold CV.
+
+    Args:
+        device: torch device
+        fold: Which fold checkpoint to load (0, 1, or 2). Default is fold 0.
+    """
+    model = FeatureFusionRegressor(backbone_name="convnext_b", pretrained=True).to(device)
+
+    # Try to load checkpoint from 3-fold CV
+    checkpoint_path = project_root / "checkpoints" / f"convnext_b_feature_fold{fold}.pth"
 
     if checkpoint_path.exists():
         print(f"Loading checkpoint from {checkpoint_path}")
         model.load_state_dict(torch.load(checkpoint_path, map_location=device))
-        print("(Model trained on 70:15:15 split with held-out test set)\n")
+        print(f"(Model trained with 3-fold CV, using fold {fold} checkpoint)\n")
     else:
         print(f"WARNING: No checkpoint found at {checkpoint_path}")
         print("Using pretrained ImageNet weights only (not fine-tuned)")
@@ -55,18 +101,38 @@ def load_best_model(device):
     return model
 
 
-def evaluate_on_test_set(model, test_loader, device):
-    """Evaluate model and collect predictions."""
+def evaluate_on_test_set(model, test_loader, device, use_tta=USE_TTA):
+    """Evaluate model and collect predictions.
+
+    Args:
+        model: Trained model
+        test_loader: Test data loader
+        device: torch device
+        use_tta: Whether to use Test-Time Augmentation (default: True)
+
+    Returns:
+        Predictions, targets, and errors arrays
+    """
     model.eval()
 
     all_preds = []
     all_targets = []
     all_errors = []
 
+    print(f"Using Test-Time Augmentation (TTA): {use_tta}")
+    if use_tta:
+        print(f"  TTA transforms: {len(TTA_TRANSFORMS)} augmentations")
+
     with torch.no_grad():
         for (x_top, x_side), y in test_loader:
             x_top, x_side, y = x_top.to(device), x_side.to(device), y.to(device)
-            preds = model(x_top, x_side)
+
+            if use_tta:
+                # Use TTA: average predictions from multiple augmented views
+                preds = predict_with_tta(model, x_top, x_side, device)
+            else:
+                # Standard inference
+                preds = model(x_top, x_side)
 
             all_preds.extend(preds.cpu().numpy())
             all_targets.extend(y.cpu().numpy())
@@ -267,22 +333,60 @@ def save_predictions(preds, targets, errors, test_df, results_dir):
     print(predictions_df[['relative_path', 'actual_age', 'predicted_age', 'absolute_error']].head(10).to_string(index=False))
 
 
-def copy_training_curves():
-    """Copy training curves from training_results to evaluation Results directory."""
-    source = project_root / "Results" / "training_results" / "convnext_t_holdout" / "graphs" / "training_curves.png"
-    dest = project_root / "Results" / "convnext_t" / "graphs" / "training_curves.png"
+def plot_training_curves(results_dir):
+    """Plot training curves from 3-fold CV metrics."""
+    metrics_file = project_root / "Results" / "best_model" / "metrics.json"
 
-    if source.exists():
-        import shutil
-        shutil.copy(source, dest)
-        print("  Saved: training_curves.png")
-    else:
-        print("  WARNING: training_curves.png not found in Results/training_results/convnext_t_holdout/")
+    if not metrics_file.exists():
+        print("  WARNING: metrics.json not found, cannot generate training curves")
+        return
+
+    with open(metrics_file, 'r') as f:
+        metrics = json.load(f)
+
+    if 'fold_results' not in metrics or not metrics['fold_results']:
+        print("  WARNING: No fold results found in metrics.json")
+        return
+
+    # Check if training history exists
+    if 'training_history' not in metrics['fold_results'][0]:
+        print("  WARNING: No training history found. Re-run train_best_model.py to generate training curves.")
+        return
+
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+
+    for fold_idx, fold_result in enumerate(metrics['fold_results']):
+        history = fold_result['training_history']
+        epochs = [h['epoch'] for h in history]
+        train_maes = [h['train_mae'] for h in history]
+        val_maes = [h['val_mae'] for h in history]
+
+        ax = axes[fold_idx]
+        ax.plot(epochs, train_maes, label='Train MAE', linewidth=2, marker='o', markersize=3)
+        ax.plot(epochs, val_maes, label='Val MAE', linewidth=2, marker='s', markersize=3)
+
+        # Mark best epoch
+        best_epoch = fold_result['best_epoch']
+        best_val_mae = fold_result['val_mae']
+        ax.axvline(x=best_epoch, color='red', linestyle='--', linewidth=1.5, alpha=0.7, label=f'Best Epoch ({best_epoch})')
+        ax.plot(best_epoch, best_val_mae, 'r*', markersize=15, label=f'Best Val MAE: {best_val_mae:.4f}')
+
+        ax.set_xlabel('Epoch', fontsize=12, fontweight='bold')
+        ax.set_ylabel('MAE (days)', fontsize=12, fontweight='bold')
+        ax.set_title(f'Fold {fold_idx + 1} Training Curves', fontsize=14, fontweight='bold')
+        ax.legend(loc='upper right', fontsize=10)
+        ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    save_path = results_dir / "graphs" / "training_curves.png"
+    plt.savefig(save_path, dpi=200, bbox_inches='tight')
+    plt.close()
+    print("  Saved: training_curves.png")
 
 
 def main():
     print("="*80)
-    print("EVALUATING BEST MODEL: ConvNeXt-T Feature Fusion")
+    print("EVALUATING BEST MODEL: ConvNeXt-B Feature Fusion")
     print("="*80)
     print()
 
@@ -293,11 +397,12 @@ def main():
     # Load model
     model = load_best_model(device)
 
-    # Load test data
+    # Load test data (with segmentation masks)
     test_csv = project_root / "Labels" / "test.csv"
     root_dir = project_root / "Dataset_Processed"
+    mask_dir = project_root / "Segmentation" / "masks"
 
-    test_ds = ChickenAgePairedDataset(test_csv, root_dir, get_default_transforms(False))
+    test_ds = ChickenAgePairedDataset(test_csv, root_dir, get_default_transforms(False), use_masks=True, mask_dir=mask_dir)
     test_loader = DataLoader(test_ds, batch_size=8, shuffle=False, num_workers=0)
 
     print(f"Test samples: {len(test_ds)}\n")
@@ -310,7 +415,7 @@ def main():
     preds, targets, errors = evaluate_on_test_set(model, test_loader, device)
 
     # Create results directory
-    results_dir = project_root / "Results" / "convnext_t"
+    results_dir = project_root / "Results" / "best_model"
     results_dir.mkdir(parents=True, exist_ok=True)
     (results_dir / "graphs").mkdir(exist_ok=True)
     (results_dir / "csv").mkdir(exist_ok=True)
@@ -324,7 +429,7 @@ def main():
     plot_confusion_matrix(preds, targets, results_dir)
     plot_error_distribution(errors, results_dir)
     plot_per_day_performance(preds, targets, errors, results_dir)
-    copy_training_curves()
+    plot_training_curves(results_dir)
 
     # Save predictions
     test_df = pd.read_csv(test_csv)
@@ -333,7 +438,7 @@ def main():
 
     # Save metrics JSON
     metrics_data = {
-        "model": "ConvNeXt-T Feature Fusion",
+        "model": "ConvNeXt-B Feature Fusion",
         "strategy": "Feature Fusion",
         "test_mae": float(mae),
         "test_mse": float(mae**2),  # Approximate MSE from MAE

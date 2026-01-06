@@ -1,0 +1,26 @@
+{
+  "top_view": {
+    "strategy": "TOP View",
+    "test_mae": 0.79154372215271,
+    "test_mse": 1.046546220779419,
+    "test_rmse": 1.0230084657669067
+  },
+  "side_view": {
+    "strategy": "SIDE View",
+    "test_mae": 0.9093349575996399,
+    "test_mse": 1.3944593667984009,
+    "test_rmse": 1.1808723211288452
+  },
+  "baseline": {
+    "strategy": "Baseline",
+    "test_mae": 0.8544428944587708,
+    "test_mse": 1.2621837854385376,
+    "test_rmse": 1.1234694719314575
+  },
+  "late_fusion": {
+    "strategy": "Late Fusion",
+    "test_mae": 0.6943937540054321,
+    "test_mse": 0.8093105554580688,
+    "test_rmse": 0.8996168971061707
+  }
+}

@@ -2,7 +2,7 @@
 Master script to train ALL 27 model configurations with 3-fold cross-validation.
 
 Training plan:
-- 9 Baseline models (single-view TOP) → Results/baseline_cv_results.json
+- 9 Baseline models (single-view TOP) → Results/comparison/csv/baseline_cv_results.json
 - 18 Fusion models (9 backbones × 2 fusion types) → Results/comparison/csv/progress.json
 
 Total: 27 models × 3 folds = 81 experiments
@@ -22,10 +22,11 @@ sys.path.insert(0, str(project_root))
 
 import json
 import time
+import random
 import torch
 import torch.nn as nn
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.optim.lr_scheduler import ReduceLROnPlateau, LambdaLR
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import KFold
@@ -35,7 +36,9 @@ from Model.dataset import ChickenAgeDataset, ChickenAgePairedDataset, get_defaul
 from torch.utils.data import DataLoader
 
 
-# Configuration
+# Configuration - OPTIMIZED hyperparameters (matching train_best_model.py)
+RANDOM_SEED = 42  # For reproducibility
+
 BACKBONES = [
     "efficientnet_b0",
     "resnet18",
@@ -48,24 +51,44 @@ BACKBONES = [
     "convnext_b",
 ]
 
-FUSION_TYPES = ["baseline", "late", "feature"]
+FUSION_TYPES = ["top_view", "late", "feature"]  # Changed from "baseline" to "top_view"
 N_FOLDS = 3
-EPOCHS = 30
-BATCH_SIZE = 8
+EPOCHS = 50  # Increased from 30
+BATCH_SIZE = 16  # Increased from 8
+WEIGHT_DECAY = 1e-2
+WARMUP_EPOCHS = 3  # NEW: Learning rate warmup
+EARLY_STOP_PATIENCE = 10  # NEW: Early stopping
+EARLY_STOP_DELTA = 0.001  # NEW: Minimum improvement threshold
+GRADIENT_CLIP_NORM = 1.0  # NEW: Gradient clipping
+
+
+def set_random_seeds(seed=42):
+    """Set random seeds for reproducibility across all libraries."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)  # For multi-GPU
+
+    # Make CuDNN deterministic (may reduce performance slightly)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+    print(f"Random seeds set to {seed} for reproducibility\n")
 
 
 def get_lr_for_backbone(backbone):
-    """Get appropriate learning rate for backbone."""
+    """Get appropriate learning rate for backbone (reduced for better convergence)."""
     if "vit" in backbone or "swin" in backbone:
-        return 5e-5  # Lower for transformers
+        return 2e-5  # Reduced from 5e-5
     elif "convnext" in backbone:
-        return 8e-5  # Slightly higher than pure transformers
+        return 2e-5  # Reduced from 8e-5
     else:
-        return 1e-4  # Standard for CNNs
+        return 2e-5  # Reduced from 1e-4
 
 
 def train_one_epoch_single(model, loader, criterion, optimizer, device):
-    """Train single-view model for one epoch."""
+    """Train single-view model for one epoch with gradient clipping."""
     model.train()
     total_mae = 0.0
     num_batches = 0
@@ -77,6 +100,10 @@ def train_one_epoch_single(model, loader, criterion, optimizer, device):
         preds = model(x)
         loss = criterion(preds, y)
         loss.backward()
+
+        # Gradient clipping
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=GRADIENT_CLIP_NORM)
+
         optimizer.step()
 
         total_mae += (preds - y).abs().mean().item()
@@ -86,7 +113,7 @@ def train_one_epoch_single(model, loader, criterion, optimizer, device):
 
 
 def train_one_epoch_fusion(model, loader, criterion, optimizer, device):
-    """Train fusion model for one epoch."""
+    """Train fusion model for one epoch with gradient clipping."""
     model.train()
     total_mae = 0.0
     num_batches = 0
@@ -98,6 +125,10 @@ def train_one_epoch_fusion(model, loader, criterion, optimizer, device):
         preds = model(x_top, x_side)
         loss = criterion(preds, y)
         loss.backward()
+
+        # Gradient clipping
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=GRADIENT_CLIP_NORM)
+
         optimizer.step()
 
         total_mae += (preds - y).abs().mean().item()
@@ -184,44 +215,68 @@ def create_cv_splits_paired(labels_csv, n_splits=3, random_state=42):
     return splits
 
 
-def train_baseline_experiment(backbone, fold_idx, train_df, val_df, device):
-    """Train baseline (single-view TOP) experiment."""
-    print(f"\n    Training {backbone} - Baseline - Fold {fold_idx+1}/{N_FOLDS}")
+def train_top_view_experiment(backbone, fold_idx, train_df, val_df, device):
+    """Train TOP view (single-view) experiment with optimized hyperparameters."""
+    print(f"\n    Training {backbone} - TOP View - Fold {fold_idx+1}/{N_FOLDS}")
 
     model = ResNetRegressor(backbone_name=backbone, pretrained=True).to(device)
 
     # Save temp CSVs
-    temp_dir = project_root / "Scripts" / "temp_all_models"
-    temp_dir.mkdir(exist_ok=True)
+    temp_dir = project_root / "temp" / "all_models"
+    temp_dir.mkdir(parents=True, exist_ok=True)
 
-    train_csv = temp_dir / f"train_baseline_{backbone}_f{fold_idx}.csv"
-    val_csv = temp_dir / f"val_baseline_{backbone}_f{fold_idx}.csv"
+    train_csv = temp_dir / f"train_top_view_{backbone}_f{fold_idx}.csv"
+    val_csv = temp_dir / f"val_top_view_{backbone}_f{fold_idx}.csv"
     train_df.to_csv(train_csv, index=False)
     val_df.to_csv(val_csv, index=False)
 
-    # Data loaders
+    # Data loaders (with segmentation masks)
     root_dir = project_root / "Dataset_Processed"
-    train_ds = ChickenAgeDataset(train_csv, root_dir, get_default_transforms(True))
-    val_ds = ChickenAgeDataset(val_csv, root_dir, get_default_transforms(False))
+    mask_dir = project_root / "Segmentation" / "masks"
+    train_ds = ChickenAgeDataset(train_csv, root_dir, get_default_transforms(True), use_masks=True, mask_dir=mask_dir)
+    val_ds = ChickenAgeDataset(val_csv, root_dir, get_default_transforms(False), use_masks=True, mask_dir=mask_dir)
 
     train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
 
-    # Training setup
+    # Training setup with optimized hyperparameters
     criterion = nn.MSELoss()
     lr = get_lr_for_backbone(backbone)
-    optimizer = AdamW(model.parameters(), lr=lr, weight_decay=1e-2)
-    scheduler = CosineAnnealingLR(optimizer, T_max=EPOCHS)
+    optimizer = AdamW(model.parameters(), lr=lr, weight_decay=WEIGHT_DECAY)
+
+    # Learning rate warmup + ReduceLROnPlateau
+    def warmup_lambda(epoch):
+        if epoch < WARMUP_EPOCHS:
+            return (epoch + 1) / WARMUP_EPOCHS
+        return 1.0
+
+    warmup_scheduler = LambdaLR(optimizer, lr_lambda=warmup_lambda)
+    plateau_scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=False)
 
     best_val_mae = float("inf")
+    epochs_without_improvement = 0
 
     for epoch in range(1, EPOCHS + 1):
         train_mae = train_one_epoch_single(model, train_loader, criterion, optimizer, device)
         val_mae = validate_single(model, val_loader, device)
-        scheduler.step()
 
-        if val_mae < best_val_mae:
+        # Learning rate scheduling
+        if epoch <= WARMUP_EPOCHS:
+            warmup_scheduler.step()
+        else:
+            plateau_scheduler.step(val_mae)
+
+        # Check for improvement
+        if val_mae < best_val_mae - EARLY_STOP_DELTA:
             best_val_mae = val_mae
+            epochs_without_improvement = 0
+        else:
+            epochs_without_improvement += 1
+
+        # Early stopping
+        if epochs_without_improvement >= EARLY_STOP_PATIENCE:
+            print(f"      Early stopping at epoch {epoch}")
+            break
 
         if epoch % 10 == 0:
             print(f"      Epoch {epoch}/{EPOCHS} - Val MAE: {val_mae:.4f} (Best: {best_val_mae:.4f})")
@@ -230,7 +285,7 @@ def train_baseline_experiment(backbone, fold_idx, train_df, val_df, device):
 
 
 def train_fusion_experiment(backbone, fusion_type, fold_idx, train_df, val_df, device):
-    """Train fusion (late or feature) experiment."""
+    """Train fusion (late or feature) experiment with optimized hyperparameters."""
     print(f"\n    Training {backbone} - {fusion_type.capitalize()} - Fold {fold_idx+1}/{N_FOLDS}")
 
     if fusion_type == "late":
@@ -239,37 +294,61 @@ def train_fusion_experiment(backbone, fusion_type, fold_idx, train_df, val_df, d
         model = FeatureFusionRegressor(backbone_name=backbone, pretrained=True).to(device)
 
     # Save temp CSVs
-    temp_dir = project_root / "Scripts" / "temp_all_models"
-    temp_dir.mkdir(exist_ok=True)
+    temp_dir = project_root / "temp" / "all_models"
+    temp_dir.mkdir(parents=True, exist_ok=True)
 
     train_csv = temp_dir / f"train_{fusion_type}_{backbone}_f{fold_idx}.csv"
     val_csv = temp_dir / f"val_{fusion_type}_{backbone}_f{fold_idx}.csv"
     train_df.to_csv(train_csv, index=False)
     val_df.to_csv(val_csv, index=False)
 
-    # Data loaders (paired dataset)
+    # Data loaders (paired dataset with segmentation masks)
     root_dir = project_root / "Dataset_Processed"
-    train_ds = ChickenAgePairedDataset(train_csv, root_dir, get_default_transforms(True))
-    val_ds = ChickenAgePairedDataset(val_csv, root_dir, get_default_transforms(False))
+    mask_dir = project_root / "Segmentation" / "masks"
+    train_ds = ChickenAgePairedDataset(train_csv, root_dir, get_default_transforms(True), use_masks=True, mask_dir=mask_dir)
+    val_ds = ChickenAgePairedDataset(val_csv, root_dir, get_default_transforms(False), use_masks=True, mask_dir=mask_dir)
 
     train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
 
-    # Training setup
+    # Training setup with optimized hyperparameters
     criterion = nn.MSELoss()
     lr = get_lr_for_backbone(backbone)
-    optimizer = AdamW(model.parameters(), lr=lr, weight_decay=1e-2)
-    scheduler = CosineAnnealingLR(optimizer, T_max=EPOCHS)
+    optimizer = AdamW(model.parameters(), lr=lr, weight_decay=WEIGHT_DECAY)
+
+    # Learning rate warmup + ReduceLROnPlateau
+    def warmup_lambda(epoch):
+        if epoch < WARMUP_EPOCHS:
+            return (epoch + 1) / WARMUP_EPOCHS
+        return 1.0
+
+    warmup_scheduler = LambdaLR(optimizer, lr_lambda=warmup_lambda)
+    plateau_scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=False)
 
     best_val_mae = float("inf")
+    epochs_without_improvement = 0
 
     for epoch in range(1, EPOCHS + 1):
         train_mae = train_one_epoch_fusion(model, train_loader, criterion, optimizer, device)
         val_mae = validate_fusion(model, val_loader, device)
-        scheduler.step()
 
-        if val_mae < best_val_mae:
+        # Learning rate scheduling
+        if epoch <= WARMUP_EPOCHS:
+            warmup_scheduler.step()
+        else:
+            plateau_scheduler.step(val_mae)
+
+        # Check for improvement
+        if val_mae < best_val_mae - EARLY_STOP_DELTA:
             best_val_mae = val_mae
+            epochs_without_improvement = 0
+        else:
+            epochs_without_improvement += 1
+
+        # Early stopping
+        if epochs_without_improvement >= EARLY_STOP_PATIENCE:
+            print(f"      Early stopping at epoch {epoch}")
+            break
 
         if epoch % 10 == 0:
             print(f"      Epoch {epoch}/{EPOCHS} - Val MAE: {val_mae:.4f} (Best: {best_val_mae:.4f})")
@@ -277,21 +356,21 @@ def train_fusion_experiment(backbone, fusion_type, fold_idx, train_df, val_df, d
     return best_val_mae
 
 
-def load_baseline_progress():
-    """Load baseline results."""
-    results_file = project_root / "Results" / "baseline_cv_results.json"
+def load_top_view_progress():
+    """Load TOP view results."""
+    results_file = project_root / "Results" / "comparison" / "csv" / "top_view_cv_results.json"
     if results_file.exists():
         with open(results_file, 'r') as f:
             return json.load(f)
     return {}
 
 
-def save_baseline_progress(results):
-    """Save baseline results."""
-    results_dir = project_root / "Results"
-    results_dir.mkdir(exist_ok=True)
+def save_top_view_progress(results):
+    """Save TOP view results."""
+    results_dir = project_root / "Results" / "comparison" / "csv"
+    results_dir.mkdir(parents=True, exist_ok=True)
 
-    results_file = results_dir / "baseline_cv_results.json"
+    results_file = results_dir / "top_view_cv_results.json"
     with open(results_file, 'w') as f:
         json.dump(results, f, indent=2)
 
@@ -316,11 +395,16 @@ def save_fusion_progress(results):
 
 
 def main():
+    # Set random seeds for reproducibility
+    set_random_seeds(RANDOM_SEED)
+
     print("="*80)
     print("TRAIN ALL 27 MODEL CONFIGURATIONS")
     print("="*80)
+    print(f"\nConfiguration:")
+    print(f"  Random seed: {RANDOM_SEED}")
     print(f"\nTraining plan:")
-    print(f"  - 9 Baseline models (single-view TOP)")
+    print(f"  - 9 TOP View models (single-view control)")
     print(f"  - 9 Late Fusion models (two-view)")
     print(f"  - 9 Feature Fusion models (two-view)")
     print(f"  Total: 27 models × {N_FOLDS} folds = {27 * N_FOLDS} experiments")
@@ -343,7 +427,7 @@ def main():
     print(f"\nDevice: {device}\n")
 
     # Load existing progress
-    baseline_results = load_baseline_progress()
+    top_view_results = load_top_view_progress()
     fusion_results = load_fusion_progress()
 
     total_experiments = len(BACKBONES) * len(FUSION_TYPES) * N_FOLDS
@@ -353,8 +437,8 @@ def main():
     for backbone in BACKBONES:
         for fusion in FUSION_TYPES:
             key = f"{backbone}_{fusion}"
-            if fusion == "baseline":
-                if key in baseline_results and len(baseline_results[key].get("fold_results", [])) == N_FOLDS:
+            if fusion == "top_view":
+                if key in top_view_results and len(top_view_results[key].get("fold_results", [])) == N_FOLDS:
                     completed += N_FOLDS
             else:
                 if key in fusion_results and len(fusion_results[key].get("fold_results", [])) == N_FOLDS:
@@ -372,10 +456,10 @@ def main():
             key = f"{backbone}_{fusion_type}"
 
             # Initialize results
-            if fusion_type == "baseline":
-                if key not in baseline_results:
-                    baseline_results[key] = {"fold_results": []}
-                fold_results = baseline_results[key]["fold_results"]
+            if fusion_type == "top_view":
+                if key not in top_view_results:
+                    top_view_results[key] = {"fold_results": []}
+                fold_results = top_view_results[key]["fold_results"]
             else:
                 if key not in fusion_results:
                     fusion_results[key] = {"fold_results": []}
@@ -390,7 +474,7 @@ def main():
             print(f"\n  Training: {backbone.upper()} + {fusion_type.upper()}")
 
             # Create CV splits
-            if fusion_type == "baseline":
+            if fusion_type == "top_view":
                 splits = create_cv_splits_single(labels_csv, n_splits=N_FOLDS)
             else:
                 splits = create_cv_splits_paired(labels_csv, n_splits=N_FOLDS)
@@ -402,8 +486,8 @@ def main():
                 try:
                     start_time = time.time()
 
-                    if fusion_type == "baseline":
-                        mae = train_baseline_experiment(backbone, fold_idx, train_df, val_df, device)
+                    if fusion_type == "top_view":
+                        mae = train_top_view_experiment(backbone, fold_idx, train_df, val_df, device)
                     else:
                         mae = train_fusion_experiment(backbone, fusion_type, fold_idx, train_df, val_df, device)
 
@@ -411,11 +495,11 @@ def main():
 
                     # Save result
                     fold_results.append(mae)
-                    if fusion_type == "baseline":
-                        baseline_results[key]["fold_results"] = fold_results
-                        baseline_results[key]["mean"] = np.mean(fold_results)
-                        baseline_results[key]["std"] = np.std(fold_results)
-                        save_baseline_progress(baseline_results)
+                    if fusion_type == "top_view":
+                        top_view_results[key]["fold_results"] = fold_results
+                        top_view_results[key]["mean"] = np.mean(fold_results)
+                        top_view_results[key]["std"] = np.std(fold_results)
+                        save_top_view_progress(top_view_results)
                     else:
                         fusion_results[key]["fold_results"] = fold_results
                         fusion_results[key]["mean"] = np.mean(fold_results)
@@ -434,15 +518,28 @@ def main():
                     print(f"\n      [FAILED] Fold {fold_idx+1} failed: {e}")
                     continue
 
+    # Combine TOP view and fusion results into all_cv_results.json for evaluation
+    print("\nCombining results into all_cv_results.json...")
+    top_view_results = load_top_view_progress()
+    fusion_results = load_fusion_progress()
+    all_results = {**top_view_results, **fusion_results}
+
+    all_results_file = project_root / "Results" / "comparison" / "csv" / "all_cv_results.json"
+    all_results_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(all_results_file, 'w') as f:
+        json.dump(all_results, f, indent=2)
+    print(f"[OK] Combined results saved to: {all_results_file}")
+
     print("\n" + "="*80)
     print("ALL MODELS TRAINED!")
     print("="*80)
     print(f"\nResults saved to:")
-    print(f"  - Baseline: Results/baseline_cv_results.json")
+    print(f"  - TOP View: Results/comparison/csv/top_view_cv_results.json")
     print(f"  - Fusion: Results/comparison/csv/progress.json")
+    print(f"  - Combined: Results/comparison/csv/all_cv_results.json")
     print(f"\nNext steps:")
-    print(f"  1. Run Scripts/evaluate_all_models.py to compare all 27 configurations")
-    print(f"  2. Run Scripts/evaluate_best_model.py for detailed best model analysis")
+    print(f"  1. Run Scripts/evaluating/evaluate_all_models.py to compare all 27 configurations")
+    print(f"  2. Run Scripts/evaluating/evaluate_best_model.py for detailed best model analysis")
 
 
 if __name__ == "__main__":

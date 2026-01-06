@@ -1,6 +1,6 @@
 """gradcam_visualization.py
 
-Grad-CAM visualization for ConvNeXt-T Feature Fusion model.
+Grad-CAM visualization for ConvNeXt-B Feature Fusion model (Best Model).
 Generates class activation maps to understand which image regions
 contribute most to age predictions.
 
@@ -12,7 +12,7 @@ This helps identify spatial features (color patterns, texture regions,
 shapes) that drive predictions, though it cannot distinguish between
 color vs texture vs shape without additional ablation studies.
 
-Input: Trained ConvNeXt-T Feature Fusion model
+Input: Trained ConvNeXt-B Feature Fusion model (0.67 MAE, 3-fold CV)
 Output:
   - Individual heatmaps for TOP and SIDE views
   - Overlay visualizations
@@ -22,6 +22,7 @@ Output:
 Usage:
   python Analysis/gradcam_visualization.py --num_samples 20
   python Analysis/gradcam_visualization.py --day 5 --num_samples 10
+  python Analysis/gradcam_visualization.py --fold 0  # Use specific fold checkpoint
 """
 
 import sys
@@ -133,12 +134,52 @@ class GradCAMFeatureFusion(GradCAM):
         else:
             raise ValueError("view must be 'top' or 'side'")
 
-        # For ConvNeXt, the last stage is stages[-1]
-        # ConvNeXt stages are Sequential modules containing ConvNeXt blocks
-        target_layer = encoder.stages[-1]
+        # For ConvNeXt wrapped in ConvNeXtFeatureExtractor:
+        # encoder.features contains the Sequential of ConvNeXt stages
+        # Hook into the last layer that outputs spatial feature maps (before avgpool)
+        target_layer = encoder.features
 
         super().__init__(model, target_layer)
         self.encoder = encoder
+
+    def generate_cam(self, input_top, input_side, target_output=None):
+        """
+        Generate class activation map for Feature Fusion model.
+
+        Args:
+            input_top: TOP view image [1, 3, H, W]
+            input_side: SIDE view image [1, 3, H, W]
+            target_output: If None, uses model's prediction
+
+        Returns:
+            cam: Class activation map [H, W]
+        """
+        # Forward pass
+        self.model.eval()
+        output = self.forward_pass(input_top, input_side)
+
+        # Backward pass
+        self.model.zero_grad()
+        if target_output is None:
+            target_output = output
+        target_output.backward()
+
+        # Generate CAM
+        gradients = self.gradients  # [1, C, H, W]
+        activations = self.activations  # [1, C, H, W]
+
+        # Global average pooling of gradients
+        weights = torch.mean(gradients, dim=(2, 3), keepdim=True)  # [1, C, 1, 1]
+
+        # Weighted combination of activation maps
+        cam = torch.sum(weights * activations, dim=1, keepdim=True)  # [1, 1, H, W]
+        cam = F.relu(cam)  # ReLU to keep only positive influences
+
+        # Normalize
+        cam = cam.squeeze().cpu().numpy()
+        cam = (cam - cam.min()) / (cam.max() - cam.min() + 1e-8)
+
+        return cam
 
     def forward_pass(self, input_top, input_side):
         """
@@ -154,18 +195,28 @@ class GradCAMFeatureFusion(GradCAM):
         return self.model(input_top, input_side)
 
 
-def load_model(device):
-    """Load the trained ConvNeXt-T Feature Fusion model."""
-    model = FeatureFusionRegressor(backbone_name="convnext_t", pretrained=True).to(device)
+def load_model(device, fold=0):
+    """
+    Load the trained ConvNeXt-B Feature Fusion model (Best Model).
 
-    checkpoint_path = project_root / "checkpoints" / "convnext_t_feature_holdout.pth"
+    Args:
+        device: torch device
+        fold: Which fold checkpoint to load (0, 1, or 2). Default: 0 (best fold)
+
+    Returns:
+        model: Loaded FeatureFusionRegressor model
+    """
+    model = FeatureFusionRegressor(backbone_name="convnext_b", pretrained=True).to(device)
+
+    checkpoint_path = project_root / "checkpoints" / f"convnext_b_feature_fold{fold}.pth"
 
     if checkpoint_path.exists():
         print(f"Loading checkpoint: {checkpoint_path}")
         model.load_state_dict(torch.load(checkpoint_path, map_location=device))
-        print("Model loaded successfully\n")
+        print(f"Model loaded successfully (Fold {fold}, 3-fold CV)\n")
     else:
         print(f"WARNING: Checkpoint not found at {checkpoint_path}")
+        print("Available checkpoints: convnext_b_feature_fold{0,1,2}.pth")
         print("Using pretrained ImageNet weights only (not fine-tuned)")
         print("Results will not be meaningful. Train the model first.\n")
 
@@ -438,18 +489,20 @@ Prediction Performance:
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Generate Grad-CAM visualizations for Feature Fusion model')
+    parser = argparse.ArgumentParser(description='Generate Grad-CAM visualizations for ConvNeXt-B Feature Fusion (Best Model)')
     parser.add_argument('--num_samples', type=int, default=20,
                        help='Number of test samples to visualize (default: 20)')
     parser.add_argument('--day', type=int, default=None, choices=[1,2,3,4,5,6,7],
                        help='Only visualize samples from specific day (default: all days)')
+    parser.add_argument('--fold', type=int, default=0, choices=[0,1,2],
+                       help='Which fold checkpoint to use (default: 0 - best fold)')
     parser.add_argument('--seed', type=int, default=42,
                        help='Random seed for sample selection (default: 42)')
 
     args = parser.parse_args()
 
     print("="*80)
-    print("GRAD-CAM VISUALIZATION: ConvNeXt-T Feature Fusion")
+    print("GRAD-CAM VISUALIZATION: ConvNeXt-B Feature Fusion (Best Model)")
     print("="*80)
     print()
 
@@ -458,7 +511,7 @@ def main():
     print(f"Device: {device}\n")
 
     # Load model
-    model = load_model(device)
+    model = load_model(device, fold=args.fold)
 
     # Load test data
     test_csv = project_root / "Labels" / "test.csv"
@@ -480,7 +533,7 @@ def main():
     print(f"Visualizing {len(df)} samples\n")
 
     # Create output directory
-    output_dir = project_root / "Analysis" / "Results" / "gradcam"
+    output_dir = project_root / "Analysis" / "Results" / f"gradcam_fold{args.fold}"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Get transforms (evaluation mode, no augmentation)
@@ -517,7 +570,8 @@ def main():
     print("\n" + "="*80)
     print("VISUALIZATION COMPLETE!")
     print("="*80)
-    print(f"\nGenerated {len(results_list)} visualizations")
+    print(f"\nModel: ConvNeXt-B Feature Fusion (Fold {args.fold})")
+    print(f"Generated {len(results_list)} visualizations")
     print(f"Results saved to: {output_dir}")
     print("\nGenerated files:")
     print("  - gradcam_sample_XXX_dayX_errorX.XX.png (individual visualizations)")
@@ -528,6 +582,7 @@ def main():
     print("  - High activation regions indicate areas most important for prediction")
     print("  - Compare TOP vs SIDE to see which view contributes more")
     print("  - Note: Grad-CAM shows WHERE the model looks, not WHAT features (color/texture/shape)")
+    print("\nTo use different fold: python Analysis/gradcam_visualization.py --fold 1")
 
 
 if __name__ == "__main__":

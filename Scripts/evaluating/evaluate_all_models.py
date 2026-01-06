@@ -43,15 +43,15 @@ BACKBONES = [
 
 # Model sizes (in millions of parameters)
 MODEL_SIZES = {
-    "efficientnet_b0": {"baseline": 4.01, "late": 8.02, "feature": 4.52},
-    "resnet18": {"baseline": 11.18, "late": 22.36, "feature": 11.69},
-    "resnet50": {"baseline": 23.51, "late": 47.03, "feature": 24.54},
-    "resnet101": {"baseline": 42.50, "late": 85.01, "feature": 43.53},
-    "vit_b_16": {"baseline": 86.57, "late": 173.13, "feature": 87.34},
-    "swin_t": {"baseline": 27.52, "late": 55.04, "feature": 28.29},
-    "swin_b": {"baseline": 87.27, "late": 174.54, "feature": 88.30},
-    "convnext_t": {"baseline": 27.82, "late": 55.64, "feature": 28.59},
-    "convnext_b": {"baseline": 88.02, "late": 176.04, "feature": 89.05},
+    "efficientnet_b0": {"top_view": 4.01, "late": 8.02, "feature": 4.52},
+    "resnet18": {"top_view": 11.18, "late": 22.36, "feature": 11.69},
+    "resnet50": {"top_view": 23.51, "late": 47.03, "feature": 24.54},
+    "resnet101": {"top_view": 42.50, "late": 85.01, "feature": 43.53},
+    "vit_b_16": {"top_view": 86.57, "late": 173.13, "feature": 87.34},
+    "swin_t": {"top_view": 27.52, "late": 55.04, "feature": 28.29},
+    "swin_b": {"top_view": 87.27, "late": 174.54, "feature": 88.30},
+    "convnext_t": {"top_view": 27.82, "late": 55.64, "feature": 28.59},
+    "convnext_b": {"top_view": 88.02, "late": 176.04, "feature": 89.05},
 }
 
 
@@ -75,23 +75,23 @@ def create_summary_table():
     summary = []
 
     for backbone in BACKBONES:
-        # Baseline (view-agnostic)
-        baseline_key = f"{backbone}_baseline"
-        if baseline_key in cv_data:
+        # TOP View (single-view control)
+        top_view_key = f"{backbone}_top_view"
+        if top_view_key in cv_data:
             summary.append({
                 "Backbone": backbone,
-                "Fusion": "Baseline",
-                "Mean MAE": cv_data[baseline_key].get("mean", np.nan),
-                "Std MAE": cv_data[baseline_key].get("std", np.nan),
-                "Params (M)": MODEL_SIZES[backbone]["baseline"],
+                "Fusion": "TOP View",
+                "Mean MAE": cv_data[top_view_key].get("mean", np.nan),
+                "Std MAE": cv_data[top_view_key].get("std", np.nan),
+                "Params (M)": MODEL_SIZES[backbone]["top_view"],
             })
         else:
             summary.append({
                 "Backbone": backbone,
-                "Fusion": "Baseline",
+                "Fusion": "TOP View",
                 "Mean MAE": np.nan,
                 "Std MAE": np.nan,
-                "Params (M)": MODEL_SIZES[backbone]["baseline"],
+                "Params (M)": MODEL_SIZES[backbone]["top_view"],
             })
 
         # Late Fusion
@@ -140,8 +140,20 @@ def plot_all_models_comparison(df):
     # Create figure with subplots for each fusion type
     fig, axes = plt.subplots(1, 3, figsize=(24, 10))
 
-    fusion_types = ["Baseline", "Late", "Feature"]
+    fusion_types = ["TOP View", "Late", "Feature"]
     colors = ["steelblue", "coral", "mediumseagreen"]
+
+    # Calculate max xlim across all fusion types for consistent scaling
+    max_mae_with_error = 0
+    for fusion in fusion_types:
+        data = df_clean[df_clean["Fusion"] == fusion]
+        if len(data) > 0:
+            # Find max MAE + std error for this fusion type
+            max_val = (data["Mean MAE"] + data["Std MAE"]).max()
+            max_mae_with_error = max(max_mae_with_error, max_val)
+
+    # Add 20% padding for annotations and visual clarity
+    xlim_max = max_mae_with_error * 1.2
 
     for idx, (fusion, color) in enumerate(zip(fusion_types, colors)):
         ax = axes[idx]
@@ -168,10 +180,11 @@ def plot_all_models_comparison(df):
                        capsize=10,
                        error_kw={'linewidth': 2.5, 'elinewidth': 2.5})
 
-                # Add annotation for best model
+                # Add annotation for best model (use relative positioning)
                 if is_best:
                     annotation_text = f'Best Model\nMAE: {row["Mean MAE"]:.4f} ± {row["Std MAE"]:.4f}'
-                    ax.text(row["Mean MAE"] + row["Std MAE"] + 0.03, row["Backbone"],
+                    # Position annotation at 70% of xlim_max to ensure it's visible
+                    ax.text(xlim_max * 0.7, row["Backbone"],
                            annotation_text,
                            fontsize=18,
                            verticalalignment='center',
@@ -198,9 +211,9 @@ def plot_all_models_comparison(df):
             ax.grid(axis='x', alpha=0.3, linewidth=1.5)
             ax.invert_yaxis()
 
-    # Set xlim AFTER all plotting to ensure it's applied
+    # Apply consistent xlim to all 3 subplots
     for ax in axes:
-        ax.set_xlim(0, 0.6)
+        ax.set_xlim(0, xlim_max)
 
     # Add main title
     fig.suptitle('All Models Comparison',
@@ -225,9 +238,9 @@ def plot_model_size_vs_performance(df):
 
     fig, ax = plt.subplots(1, 1, figsize=(12, 8))
 
-    fusion_types = ["Baseline", "Late", "Feature"]
-    colors = {"Baseline": "steelblue", "Late": "coral", "Feature": "mediumseagreen"}
-    markers = {"Baseline": "o", "Late": "s", "Feature": "^"}
+    fusion_types = ["TOP View", "Late", "Feature"]
+    colors = {"TOP View": "steelblue", "Late": "coral", "Feature": "mediumseagreen"}
+    markers = {"TOP View": "o", "Late": "s", "Feature": "^"}
 
     for fusion in fusion_types:
         data = df_clean[df_clean["Fusion"] == fusion]
@@ -343,17 +356,17 @@ def perform_statistical_analysis(df):
     report.append("")
 
     correlations = {}
-    for fusion in ["Baseline", "Late", "Feature"]:
+    for fusion in ["TOP View", "Late", "Feature"]:
         data = df_clean[df_clean["Fusion"] == fusion]
         if len(data) >= 3:  # Need at least 3 points for meaningful correlation
             # Use log of params for better linear relationship
             rho, p_value = spearmanr(np.log10(data["Params (M)"]), data["Mean MAE"])
             correlations[fusion] = {"rho": rho, "p": p_value}
             significance = "***" if p_value < 0.001 else "**" if p_value < 0.01 else "*" if p_value < 0.05 else "ns"
-            report.append(f"   {fusion:12} Fusion:  rho = {rho:+.4f}  (p = {p_value:.4f}) {significance}")
+            report.append(f"   {fusion:12}:  rho = {rho:+.4f}  (p = {p_value:.4f}) {significance}")
         else:
             correlations[fusion] = {"rho": np.nan, "p": np.nan}
-            report.append(f"   {fusion:12} Fusion:  Insufficient data (n={len(data)})")
+            report.append(f"   {fusion:12}:  Insufficient data (n={len(data)})")
 
     report.append("")
     report.append("   Interpretation:")
@@ -363,40 +376,40 @@ def perform_statistical_analysis(df):
 
     # Analysis 2: Improvement Ratio (Fusion vs Baseline)
     report.append("")
-    report.append("2. FUSION BENEFIT ANALYSIS: Improvement Over Baseline")
+    report.append("2. FUSION BENEFIT ANALYSIS: Improvement Over TOP View Control")
     report.append("-"*80)
-    report.append("   Calculates: (Baseline MAE - Fusion MAE) / Baseline MAE")
-    report.append("   Positive = Fusion is better, Negative = Baseline is better")
+    report.append("   Calculates: (TOP View MAE - Fusion MAE) / TOP View MAE")
+    report.append("   Positive = Fusion is better, Negative = TOP View is better")
     report.append("")
 
     improvement_data = []
 
     for backbone in BACKBONES:
-        baseline_data = df_clean[(df_clean["Backbone"] == backbone) & (df_clean["Fusion"] == "Baseline")]
+        top_view_data = df_clean[(df_clean["Backbone"] == backbone) & (df_clean["Fusion"] == "TOP View")]
         late_data = df_clean[(df_clean["Backbone"] == backbone) & (df_clean["Fusion"] == "Late")]
         feature_data = df_clean[(df_clean["Backbone"] == backbone) & (df_clean["Fusion"] == "Feature")]
 
-        if len(baseline_data) > 0:
-            baseline_mae = baseline_data["Mean MAE"].values[0]
-            baseline_params = baseline_data["Params (M)"].values[0]
+        if len(top_view_data) > 0:
+            top_view_mae = top_view_data["Mean MAE"].values[0]
+            top_view_params = top_view_data["Params (M)"].values[0]
 
             if len(late_data) > 0:
                 late_mae = late_data["Mean MAE"].values[0]
-                late_improvement = (baseline_mae - late_mae) / baseline_mae * 100
+                late_improvement = (top_view_mae - late_mae) / top_view_mae * 100
                 improvement_data.append({
                     "Backbone": backbone,
                     "Fusion": "Late",
-                    "Params (M)": baseline_params,  # Use baseline params for comparison
+                    "Params (M)": top_view_params,  # Use TOP view params for comparison
                     "Improvement (%)": late_improvement
                 })
 
             if len(feature_data) > 0:
                 feature_mae = feature_data["Mean MAE"].values[0]
-                feature_improvement = (baseline_mae - feature_mae) / baseline_mae * 100
+                feature_improvement = (top_view_mae - feature_mae) / top_view_mae * 100
                 improvement_data.append({
                     "Backbone": backbone,
                     "Fusion": "Feature",
-                    "Params (M)": baseline_params,  # Use baseline params for comparison
+                    "Params (M)": top_view_params,  # Use TOP view params for comparison
                     "Improvement (%)": feature_improvement
                 })
 
@@ -404,7 +417,7 @@ def perform_statistical_analysis(df):
         improvement_df = pd.DataFrame(improvement_data)
 
         # Show improvement by backbone
-        report.append("   Improvement by Model Size (using baseline params as reference):")
+        report.append("   Improvement by Model Size (using TOP view params as reference):")
         report.append("")
         for backbone in BACKBONES:
             backbone_data = improvement_df[improvement_df["Backbone"] == backbone]
@@ -414,7 +427,7 @@ def perform_statistical_analysis(df):
                 for _, row in backbone_data.iterrows():
                     improvement = row["Improvement (%)"]
                     sign = "+" if improvement > 0 else ""
-                    report.append(f"      {row['Fusion']:8} Fusion: {sign}{improvement:6.2f}%")
+                    report.append(f"      {row['Fusion']:8}: {sign}{improvement:6.2f}%")
 
         report.append("")
         report.append("")
@@ -457,20 +470,20 @@ def perform_statistical_analysis(df):
             winners = fusion_data[fusion_data["Improvement (%)"] > 0]
             losers = fusion_data[fusion_data["Improvement (%)"] <= 0]
 
-            report.append(f"   {fusion} Fusion:")
+            report.append(f"   {fusion}:")
             if len(winners) > 0:
                 threshold = winners["Params (M)"].min()
                 winner_backbones = winners["Backbone"].tolist()
                 report.append(f"      Fusion wins at:     >={threshold:.1f}M params  (models: {', '.join(winner_backbones)})")
             else:
-                report.append(f"      Fusion wins at:     Never (baseline always better)")
+                report.append(f"      Fusion wins at:     Never (TOP view always better)")
 
             if len(losers) > 0:
                 loser_backbones = losers["Backbone"].tolist()
                 max_loser = losers["Params (M)"].max()
-                report.append(f"      Baseline wins at:   <={max_loser:.1f}M params  (models: {', '.join(loser_backbones)})")
+                report.append(f"      TOP View wins at:   <={max_loser:.1f}M params  (models: {', '.join(loser_backbones)})")
             else:
-                report.append(f"      Baseline wins at:   Never (fusion always better)")
+                report.append(f"      TOP View wins at:   Never (fusion always better)")
             report.append("")
 
     report.append("")
@@ -480,19 +493,19 @@ def perform_statistical_analysis(df):
     report.append("4. KEY FINDINGS")
     report.append("="*80)
 
-    # Check if feature fusion has stronger correlation than baseline
-    if "Feature" in correlations and "Baseline" in correlations:
+    # Check if feature fusion has stronger correlation than TOP view
+    if "Feature" in correlations and "TOP View" in correlations:
         feature_rho = correlations["Feature"]["rho"]
-        baseline_rho = correlations["Baseline"]["rho"]
+        top_view_rho = correlations["TOP View"]["rho"]
 
-        if not np.isnan(feature_rho) and not np.isnan(baseline_rho):
-            if abs(feature_rho) > abs(baseline_rho):
-                report.append("   + Feature Fusion shows STRONGER correlation with model size than Baseline")
-                report.append(f"     (|rho_feature| = {abs(feature_rho):.4f} > |rho_baseline| = {abs(baseline_rho):.4f})")
+        if not np.isnan(feature_rho) and not np.isnan(top_view_rho):
+            if abs(feature_rho) > abs(top_view_rho):
+                report.append("   + Feature Fusion shows STRONGER correlation with model size than TOP View")
+                report.append(f"     (|rho_feature| = {abs(feature_rho):.4f} > |rho_top_view| = {abs(top_view_rho):.4f})")
                 report.append("     -> Fusion strategies benefit MORE from increased model capacity")
             else:
-                report.append("   - Feature Fusion shows WEAKER correlation with model size than Baseline")
-                report.append(f"     (|rho_feature| = {abs(feature_rho):.4f} < |rho_baseline| = {abs(baseline_rho):.4f})")
+                report.append("   - Feature Fusion shows WEAKER correlation with model size than TOP View")
+                report.append(f"     (|rho_feature| = {abs(feature_rho):.4f} < |rho_top_view| = {abs(top_view_rho):.4f})")
 
     report.append("")
 
@@ -539,9 +552,9 @@ def plot_model_size_vs_performance_enhanced(df, correlations, improvement_df):
     # Left plot: Model Size vs MAE with correlation coefficients
     ax1 = axes[0]
 
-    fusion_types = ["Baseline", "Late", "Feature"]
-    colors = {"Baseline": "steelblue", "Late": "coral", "Feature": "mediumseagreen"}
-    markers = {"Baseline": "o", "Late": "s", "Feature": "^"}
+    fusion_types = ["TOP View", "Late", "Feature"]
+    colors = {"TOP View": "steelblue", "Late": "coral", "Feature": "mediumseagreen"}
+    markers = {"TOP View": "o", "Late": "s", "Feature": "^"}
 
     for fusion in fusion_types:
         data = df_clean[df_clean["Fusion"] == fusion]
@@ -600,8 +613,8 @@ def plot_model_size_vs_performance_enhanced(df, correlations, improvement_df):
         # Add horizontal line at y=0
         ax2.axhline(y=0, color='black', linestyle='--', linewidth=2, alpha=0.5, label='Break-even')
 
-        ax2.set_xlabel("Baseline Model Size (Million Parameters)", fontsize=14, fontweight='bold')
-        ax2.set_ylabel("Improvement over Baseline (%)", fontsize=14, fontweight='bold')
+        ax2.set_xlabel("TOP View Model Size (Million Parameters)", fontsize=14, fontweight='bold')
+        ax2.set_ylabel("Improvement over TOP View (%)", fontsize=14, fontweight='bold')
         ax2.set_title("Fusion Benefit vs Model Size\n(Positive = Fusion Wins)", fontsize=16, fontweight='bold')
         ax2.legend(fontsize=11, loc='best')
         ax2.grid(True, alpha=0.3)

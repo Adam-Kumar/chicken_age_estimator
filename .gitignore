@@ -59,6 +59,7 @@ Model/checkpoints/*.pth
 *.log
 post_survey_images.txt
 pre_survey_images.txt
+temp/
 
 # Results (optional - uncomment to exclude generated results)
 # Results/training_curves/*.png

@@ -7,6 +7,7 @@ from typing import Any, Callable, Optional
 
 import pandas as pd
 from PIL import Image
+import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms as T
@@ -21,6 +22,38 @@ __all__ = [
 ]
 
 
+def apply_mask_to_image(image: Image.Image, mask_path: Path, bg_value: int = 255) -> Image.Image:
+    """Apply binary mask to image, setting background to bg_value (default white).
+
+    Args:
+        image: PIL Image (RGB)
+        mask_path: Path to mask file (binary: 255=foreground, 0=background)
+        bg_value: Background color (0=black, 255=white)
+
+    Returns:
+        Masked PIL Image
+    """
+    if not mask_path.exists():
+        # If mask doesn't exist, return original image
+        return image
+
+    # Load mask
+    mask = Image.open(mask_path).convert('L')  # Grayscale
+    mask_np = np.array(mask)
+
+    # Convert to binary (threshold at 127)
+    mask_binary = (mask_np > 127).astype(np.uint8)
+
+    # Apply mask to image
+    img_np = np.array(image)
+    masked = img_np.copy()
+
+    # Set background pixels to bg_value
+    masked[mask_binary == 0] = bg_value
+
+    return Image.fromarray(masked)
+
+
 class ChickenAgeDataset(Dataset):
     """Dataset that loads images and day labels from a CSV."""
 
@@ -29,12 +62,16 @@ class ChickenAgeDataset(Dataset):
         csv_file: str | Path,
         root_dir: str | Path = "Dataset_Processed",
         transforms: Optional[Callable] = None,
+        use_masks: bool = False,
+        mask_dir: Optional[str | Path] = None,
     ) -> None:
         self.root_dir = Path(root_dir)
         self.df = pd.read_csv(csv_file)
         if "relative_path" not in self.df.columns or "day" not in self.df.columns:
             raise ValueError("CSV must contain relative_path and day columns")
         self.transforms = transforms
+        self.use_masks = use_masks
+        self.mask_dir = Path(mask_dir) if mask_dir else Path("Segmentation/masks")
 
     def __len__(self) -> int:  # noqa: D401
         return len(self.df)
@@ -43,6 +80,12 @@ class ChickenAgeDataset(Dataset):
         row = self.df.iloc[idx]
         img_path = self.root_dir / row["relative_path"]
         image = Image.open(img_path).convert("RGB")
+
+        # Apply mask if enabled
+        if self.use_masks:
+            mask_path = self.mask_dir / row["relative_path"]
+            image = apply_mask_to_image(image, mask_path, bg_value=255)
+
         label = torch.tensor(float(row["day"]), dtype=torch.float32)
         if self.transforms:
             image = self.transforms(image)
@@ -91,10 +134,12 @@ def create_dataloaders(
     root_dir: str | Path = "Dataset_Processed",
     batch_size: int = 32,
     num_workers: int = 4,
+    use_masks: bool = False,
+    mask_dir: Optional[str | Path] = None,
 ):
-    train_ds = ChickenAgeDataset(train_csv, root_dir, get_default_transforms(True))
-    val_ds = ChickenAgeDataset(val_csv, root_dir, get_default_transforms(False))
-    test_ds = ChickenAgeDataset(test_csv, root_dir, get_default_transforms(False))
+    train_ds = ChickenAgeDataset(train_csv, root_dir, get_default_transforms(True), use_masks, mask_dir)
+    val_ds = ChickenAgeDataset(val_csv, root_dir, get_default_transforms(False), use_masks, mask_dir)
+    test_ds = ChickenAgeDataset(test_csv, root_dir, get_default_transforms(False), use_masks, mask_dir)
 
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=True)
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
@@ -116,9 +161,13 @@ class ChickenAgePairedDataset(Dataset):
         csv_file: str | Path,
         root_dir: str | Path = "Dataset_Processed",
         transforms: Optional[Callable] = None,
+        use_masks: bool = False,
+        mask_dir: Optional[str | Path] = None,
     ) -> None:
         self.root_dir = Path(root_dir)
         self.transforms = transforms
+        self.use_masks = use_masks
+        self.mask_dir = Path(mask_dir) if mask_dir else Path("Segmentation/masks")
         df = pd.read_csv(csv_file)
         # Keep only top view rows, assume matching side exists
         self.df_top = df[df["view"].str.upper() == "TOP VIEW"].reset_index(drop=True)
@@ -140,6 +189,13 @@ class ChickenAgePairedDataset(Dataset):
         img_top = Image.open(top_path).convert("RGB")
         img_side = Image.open(side_path).convert("RGB")
 
+        # Apply masks if enabled
+        if self.use_masks:
+            mask_top_path = self.mask_dir / row["relative_path"]
+            mask_side_path = self.mask_dir / side_relative
+            img_top = apply_mask_to_image(img_top, mask_top_path, bg_value=255)
+            img_side = apply_mask_to_image(img_side, mask_side_path, bg_value=255)
+
         if self.transforms:
             img_top = self.transforms(img_top)
             img_side = self.transforms(img_side)
@@ -155,10 +211,12 @@ def create_dataloaders_fusion(
     root_dir: str | Path = "Dataset_Processed",
     batch_size: int = 16,
     num_workers: int = 4,
+    use_masks: bool = False,
+    mask_dir: Optional[str | Path] = None,
 ):
-    train_ds = ChickenAgePairedDataset(train_csv, root_dir, get_default_transforms(True))
-    val_ds = ChickenAgePairedDataset(val_csv, root_dir, get_default_transforms(False))
-    test_ds = ChickenAgePairedDataset(test_csv, root_dir, get_default_transforms(False))
+    train_ds = ChickenAgePairedDataset(train_csv, root_dir, get_default_transforms(True), use_masks, mask_dir)
+    val_ds = ChickenAgePairedDataset(val_csv, root_dir, get_default_transforms(False), use_masks, mask_dir)
+    test_ds = ChickenAgePairedDataset(test_csv, root_dir, get_default_transforms(False), use_masks, mask_dir)
 
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=True)
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)

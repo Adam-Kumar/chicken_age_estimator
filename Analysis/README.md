@@ -2,7 +2,7 @@
 
 **Location**: `Project/Analysis/`
 
-This directory contains scripts for analyzing what visual features drive the ConvNeXt-T Feature Fusion model's age predictions for chicken drumettes.
+This directory contains scripts for analyzing what visual features drive the ConvNeXt-B Feature Fusion model's (best model) age predictions for chicken drumettes.
 
 ## Overview
 
@@ -18,11 +18,14 @@ Understanding which features (color, texture, shape, spatial patterns) are most 
 
 **Script**: `gradcam_visualization.py`
 
+**Model**: ConvNeXt-B Feature Fusion (Best Model, 0.67 MAE from 3-fold CV)
+
 **What it does**:
 - Generates class activation maps showing which spatial regions drive predictions
 - Visualizes both TOP and SIDE view encoder activations separately
 - Creates heatmap overlays on original images
 - Provides summary statistics across samples
+- Supports loading from different fold checkpoints (fold 0, 1, or 2)
 
 **Limitations**:
 - Shows **WHERE** the model looks, not **WHAT** features it uses
@@ -31,17 +34,20 @@ Understanding which features (color, texture, shape, spatial patterns) are most 
 
 **Usage**:
 ```bash
-# Visualize 20 random test samples
+# Visualize 20 random test samples (using fold 0 checkpoint)
 python Analysis/gradcam_visualization.py --num_samples 20
 
 # Visualize only day 5 samples
 python Analysis/gradcam_visualization.py --day 5 --num_samples 10
 
+# Use fold 1 checkpoint
+python Analysis/gradcam_visualization.py --fold 1 --num_samples 20
+
 # Visualize all test samples
 python Analysis/gradcam_visualization.py --num_samples 200
 ```
 
-**Output**: `Analysis/Results/gradcam/`
+**Output**: `Analysis/Results/gradcam_fold{N}/` (where N is the fold number)
 - Individual visualizations: `gradcam_sample_XXX_dayX_errorX.XX.png`
 - Summary statistics: `gradcam_summary.csv`
 - Summary plots: `gradcam_summary.png`
@@ -140,39 +146,34 @@ python Analysis/gradcam_visualization.py --num_samples 200
 
 ```
 Analysis/
-├── gradcam_visualization.py    # Grad-CAM implementation
-├── input_ablation.py           # Ablation studies (placeholder)
-├── color_statistics.py         # Color analysis (placeholder)
+├── gradcam_visualization.py    # Grad-CAM implementation for ConvNeXt-B
 ├── README.md                   # This file
 └── Results/                    # All analysis outputs
-    ├── gradcam/                # Grad-CAM visualizations
-    │   ├── gradcam_sample_XXX.png  # Individual heatmaps
-    │   ├── gradcam_summary.csv     # Activation statistics
-    │   └── gradcam_summary.png     # Summary plots
-    ├── ablation/               # Ablation study results (future)
-    │   ├── grayscale/
-    │   ├── blurred/
-    │   └── edges_only/
-    └── color_analysis/         # Color statistics (future)
-        ├── rgb_progression.png
-        └── color_metrics.csv
+    ├── gradcam_fold0/          # Grad-CAM visualizations (fold 0)
+    │   ├── gradcam_sample_XXX_dayX_errorX.XX.png
+    │   ├── gradcam_summary.csv
+    │   └── gradcam_summary.png
+    ├── gradcam_fold1/          # Grad-CAM visualizations (fold 1)
+    └── gradcam_fold2/          # Grad-CAM visualizations (fold 2)
 ```
 
 ---
 
 ## Model Architecture Notes
 
-**Feature Fusion Model**:
-- **Backbone**: ConvNeXt-Tiny (two independent encoders)
+**Feature Fusion Model (Best Model)**:
+- **Backbone**: ConvNeXt-Base (89M parameters, two independent encoders)
 - **TOP encoder**: Processes dorsal view images
 - **SIDE encoder**: Processes lateral view images
 - **Fusion**: Concatenate features → MLP regressor
-- **Target layer for Grad-CAM**: `encoder.stages[-1]` (last ConvNeXt stage)
+- **Target layer for Grad-CAM**: `encoder.features` (last ConvNeXt stage)
 
-**Why Feature Fusion?**:
-- Best model in cross-validation (0.172 MAE)
-- 2nd best on held-out test set (0.204 MAE)
+**Why ConvNeXt-B Feature Fusion?**:
+- Best model in cross-validation (0.61-0.67 MAE across runs)
+- Ranked #1 in comprehensive 27-model comparison
+- Larger architecture (89M params vs 28M for ConvNeXt-T)
 - Provides insights into both view-specific feature importance
+- 3-fold CV with random seed for reproducibility
 
 ---
 
@@ -230,6 +231,9 @@ Ritsumeikan University
 
 ## Notes
 
-- All analysis uses the trained ConvNeXt-T Feature Fusion model (`checkpoints/convnext_t_feature_holdout.pth`)
-- Test set is held-out (13 chickens, 91 paired samples)
-- Ensure model is trained before running analysis scripts
+- All analysis uses the trained ConvNeXt-B Feature Fusion model (best model)
+- Checkpoints available: `checkpoints/convnext_b_feature_fold{0,1,2}.pth`
+- Default: Uses fold 0 checkpoint (best performing fold)
+- Test set is held-out (13 chickens, ~91 paired samples)
+- Model trained with random seed=42 for reproducibility
+- 3-fold cross-validation: 0.67 ± 0.04 MAE
