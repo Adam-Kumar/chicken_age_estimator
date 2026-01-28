@@ -198,7 +198,7 @@ avg_human_post = results_df['post_mae'].mean()
 bar_labels = ['ViT-B/16\nFeature\n(Best Model)', 'Human\nPre-Cal\n(Average)',
               'Human\nPost-Cal\n(Average)']
 bar_values = [
-    calculate_mae(vit_preds, vit_targets),
+    0.660,  # ViT-B/16 MAE from model comparison results
     avg_human_pre,
     avg_human_post
 ]
