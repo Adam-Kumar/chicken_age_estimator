@@ -1,0 +1,4 @@
+Fusion,Backbone,Architecture,Mean MAE,Std MAE,Params (M)
+Feature,vit_b_16,Transformer,0.6595581957162956,0.02741691771101208,87.34
+Late,convnext_t,Modernized CNN,0.662437877084455,0.03143994851424154,55.64
+TOP View,convnext_t,Modernized CNN,0.7103545481068457,0.04877531602534946,27.82

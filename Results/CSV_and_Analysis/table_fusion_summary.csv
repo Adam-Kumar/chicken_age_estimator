@@ -1,0 +1,6 @@
+,Mean MAE,Mean MAE,Mean MAE,Mean MAE,Params (M),Params (M),Params (M)
+,mean,std,min,max,mean,min,max
+Fusion,,,,,,,
+Feature,0.7609,0.1078,0.6596,0.9217,45.0944,4.52,89.05
+Late,0.7546,0.093,0.6624,0.9352,88.5344,8.02,176.04
+TOP View,0.8146,0.1025,0.7104,0.9662,44.2667,4.01,88.02

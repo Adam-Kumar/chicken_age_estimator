@@ -1,0 +1,6 @@
+,Mean MAE,Mean MAE,Mean MAE,Params (M),Params (M),Params (M)
+,mean,std,min,mean,min,max
+Architecture,,,,,,
+Modernized CNN,0.6872,0.0237,0.6624,77.5267,27.82,176.04
+Traditional CNN,0.873,0.0652,0.7553,27.325,4.01,85.01
+Transformer,0.7079,0.0422,0.6596,89.7778,27.52,174.54
